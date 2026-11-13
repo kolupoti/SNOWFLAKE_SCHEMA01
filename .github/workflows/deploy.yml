@@ -1,0 +1,11 @@
+name: Snowflake Deployment
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deployment:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deployment placeholder
+        run: echo "Configure Snowflake DCM deployment here"
