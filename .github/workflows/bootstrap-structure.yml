@@ -1,4 +1,6 @@
 
+permissions:
+  contents: write
 name: Bootstrap Snowflake Repository Structure
 
 on:
