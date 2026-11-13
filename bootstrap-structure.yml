@@ -1,0 +1,144 @@
+name: Bootstrap Snowflake Repository Structure
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: "Branch where the structure should be created"
+        required: true
+        type: choice
+        options:
+          - dev
+          - qa
+          - uat
+          - prod
+
+      schema_name:
+        description: "Snowflake schema name"
+        required: true
+        default: "SCHEMA01"
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  create-structure:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_branch }}
+          fetch-depth: 0
+
+      - name: Create standard folders
+        shell: bash
+        run: |
+          set -e
+
+          SCHEMA="${{ inputs.schema_name }}"
+          BASE="database/${SCHEMA}"
+
+          FOLDERS=(
+            "tables"
+            "views"
+            "procedures"
+            "functions"
+            "streams"
+            "tasks"
+            "stages"
+            "grants"
+            "streamlit"
+            "skills"
+          )
+
+          for folder in "${FOLDERS[@]}"; do
+            mkdir -p "${BASE}/${folder}"
+            touch "${BASE}/${folder}/.gitkeep"
+          done
+
+          mkdir -p ".github/workflows"
+
+          # Create manifest only if it does not exist
+          if [ ! -f manifest.yml ]; then
+            cat > manifest.yml <<EOF
+          schema: ${SCHEMA}
+          database: YOUR_DATABASE_NAME
+          deployment_tool: snowflake-dcm
+          EOF
+          fi
+
+          # Create README only if it does not exist
+          if [ ! -f README.md ]; then
+            cat > README.md <<EOF
+          # Snowflake ${SCHEMA}
+
+          Schema-specific Snowflake database objects.
+
+          ## Folder Structure
+
+          - tables
+          - views
+          - procedures
+          - functions
+          - streams
+          - tasks
+          - stages
+          - grants
+          - streamlit
+          - skills
+
+          ## Deployment
+
+          Deployment is managed through Snowflake DCM
+          and GitHub Actions.
+          EOF
+          fi
+
+          # Create .gitignore only if it does not exist
+          if [ ! -f .gitignore ]; then
+            cat > .gitignore <<'EOF'
+          .DS_Store
+          *.log
+          *.tmp
+          .env
+          .venv/
+          __pycache__/
+          EOF
+          fi
+
+          # Create deployment workflow placeholder
+          if [ ! -f .github/workflows/deploy.yml ]; then
+            cat > .github/workflows/deploy.yml <<'EOF'
+          name: Snowflake Deployment
+
+          on:
+            workflow_dispatch:
+
+          jobs:
+            deployment:
+              runs-on: ubuntu-latest
+              steps:
+                - name: Deployment placeholder
+                  run: echo "Configure Snowflake DCM deployment here"
+          EOF
+          fi
+
+      - name: Commit and push structure
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add database manifest.yml README.md \
+            .gitignore .github/workflows
+
+          if git diff --cached --quiet; then
+            echo "No changes required."
+          else
+            git commit -m "Initialize standard Snowflake repository structure"
+            git push origin HEAD:${{ inputs.target_branch }}
+          fi
