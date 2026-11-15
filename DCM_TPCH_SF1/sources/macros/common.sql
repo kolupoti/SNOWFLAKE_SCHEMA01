@@ -1,6 +1,0 @@
--- Common reusable SQL macros
---
--- Purpose:
--- Maintain reusable SQL logic for this DCM project.
---
--- Add project-level macros supported by Snowflake DCM.
