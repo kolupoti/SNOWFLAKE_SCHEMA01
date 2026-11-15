@@ -1,0 +1,2 @@
+-- Table definitions
+-- Add Snowflake DCM SQL definitions here.

@@ -1,0 +1,2 @@
+-- Common reusable SQL macros
+-- Add project-level reusable macros here.
