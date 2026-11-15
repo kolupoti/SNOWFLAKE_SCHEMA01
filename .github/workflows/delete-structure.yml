@@ -1,67 +1,5 @@
 
-name: Delete Snowflake DCM Project Structure
-
-on:
-  workflow_dispatch:
-    inputs:
-      target_branch:
-        description: "Branch from which the DCM project structure should be deleted"
-        required: true
-        type: choice
-        options:
-          - dev
-          - qa
-          - uat
-          - prod
-
-      schema_name:
-        description: "Enter the Snowflake schema name to delete (e.g., TPCH_SF1, SALES, FINANCE)"
-        required: true
-        type: string
-
-permissions:
-  contents: write
-
-jobs:
-  delete-structure:
-    runs-on: ubuntu-latest
-
-    steps:
-      # --------------------------------------------------
-      # 1. CHECKOUT SELECTED BRANCH
-      # --------------------------------------------------
-
-      - name: Checkout target branch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.target_branch }}
-          token: ${{ secrets.BOOTSTRAP_TOKEN }}
-          fetch-depth: 0
-
-      # --------------------------------------------------
-      # 2. VALIDATE SCHEMA NAME
-      # --------------------------------------------------
-
-      - name: Validate schema name
-        shell: bash
-        env:
-          SCHEMA_NAME: ${{ inputs.schema_name }}
-        run: |
-          set -euo pipefail
-
-          if [[ ! "${SCHEMA_NAME}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
-            echo "ERROR: Invalid schema name: ${SCHEMA_NAME}"
-            echo "Use letters, numbers and underscores."
-            exit 1
-          fi
-
-          echo "Schema name validated: ${SCHEMA_NAME}"
-
-      # --------------------------------------------------
-      # 3. DELETE SCHEMA-SPECIFIC DCM PROJECT
-      # --------------------------------------------------
-
-      - name: Delete DCM project structure
+      - name: Delete complete DCM repository structure
         shell: bash
         env:
           SCHEMA_NAME: ${{ inputs.schema_name }}
@@ -71,149 +9,48 @@ jobs:
           PROJECT_DIR="DCM_${SCHEMA_NAME}"
 
           echo "======================================"
-          echo "Deleting Snowflake DCM project"
+          echo "Deleting DCM repository structure"
           echo "Project: ${PROJECT_DIR}"
-          echo "Schema: ${SCHEMA_NAME}"
           echo "======================================"
 
-          # Verify the selected project exists
+          # Verify selected project exists
           if [ ! -d "${PROJECT_DIR}" ]; then
             echo "ERROR: Project directory does not exist: ${PROJECT_DIR}"
             exit 1
           fi
 
-          # Delete the complete schema-specific project
+          # 1. Delete complete schema-specific DCM project
           rm -rf -- "${PROJECT_DIR}"
 
-          echo "Deleted complete project directory: ${PROJECT_DIR}"
+          echo "Deleted: ${PROJECT_DIR}"
 
-          # This removes all project-specific content:
-          # - manifest.yml
-          # - README.md
-          # - sources/definitions/
-          # - sources/macros/
-          # - .gitignore
-          # - Any additional project-specific files
-
-      # --------------------------------------------------
-      # 4. UPDATE REPOSITORY-LEVEL README
-      # --------------------------------------------------
-
-      - name: Update repository README
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [ ! -f "README.md" ]; then
-            echo "ERROR: Repository README.md does not exist."
-            exit 1
+          # 2. Delete shared DCM Plan workflow
+          if [ -f ".github/workflows/dcm-plan.yml" ]; then
+            rm -f ".github/workflows/dcm-plan.yml"
+            echo "Deleted: .github/workflows/dcm-plan.yml"
           fi
 
-          echo "Updating repository-level DCM project listing..."
-
-          python3 <<'PYTHON'
-          import re
-          from pathlib import Path
-
-          readme = Path("README.md")
-
-          content = readme.read_text(encoding="utf-8")
-
-          # Find all remaining DCM project directories
-          projects = sorted(
-              path.name
-              for path in Path(".").glob("DCM_*")
-              if path.is_dir()
-          )
-
-          # Generate the updated project listing
-          if projects:
-              project_list = "\n".join(
-                  f"- **{project.removeprefix('DCM_')}** - `{project}`"
-                  for project in projects
-              )
-          else:
-              project_list = (
-                  "- No DCM projects are currently configured in this repository."
-              )
-
-          # Replace only the Current DCM Projects section.
-          # All other repository documentation is preserved.
-          pattern = (
-              r"(?ms)^## 4\. Current DCM Projects\s*\n"
-              r".*?"
-              r"(?=^## 5\.)"
-          )
-
-          replacement = (
-              "## 4. Current DCM Projects\n\n"
-              "The following DCM projects are present in this repository:\n\n"
-              f"{project_list}\n\n"
-              "Each project has its own manifest.yml, README.md,\n"
-              "SQL definitions and reusable macros.\n\n"
-          )
-
-          updated_content, count = re.subn(
-              pattern,
-              lambda match: replacement,
-              content,
-              count=1
-          )
-
-          if count != 1:
-              raise SystemExit(
-                  "ERROR: Could not locate the Current DCM Projects "
-                  "section in README.md. No README changes were made."
-              )
-
-          readme.write_text(updated_content, encoding="utf-8")
-
-          print("Repository README updated successfully.")
-          print("Remaining DCM projects:")
-
-          for project in projects:
-              print(f" - {project}")
-
-          if not projects:
-              print(" - No DCM projects remaining.")
-          PYTHON
-
-      # --------------------------------------------------
-      # 5. COMMIT AND PUSH DELETION
-      # --------------------------------------------------
-
-      - name: Commit and push deletion
-        shell: bash
-        env:
-          TARGET_BRANCH: ${{ inputs.target_branch }}
-          SCHEMA_NAME: ${{ inputs.schema_name }}
-        run: |
-          set -euo pipefail
-
-          PROJECT_DIR="DCM_${SCHEMA_NAME}"
-
-          git config user.name "github-actions[bot]"
-          git config user.email \
-            "41898282+github-actions[bot]@users.noreply.github.com"
-
-          # Stage only the deleted project and updated README.
-          # Do not stage unrelated repository changes.
-          git add -A -- "${PROJECT_DIR}" README.md
-
-          if git diff --cached --quiet; then
-            echo "No changes detected."
-            exit 0
+          # 3. Delete shared DCM Deploy workflow
+          if [ -f ".github/workflows/dcm-deploy.yml" ]; then
+            rm -f ".github/workflows/dcm-deploy.yml"
+            echo "Deleted: .github/workflows/dcm-deploy.yml"
           fi
 
-          git commit -m "Remove DCM project for ${SCHEMA_NAME}"
+          # 4. Delete repository-level README
+          if [ -f "README.md" ]; then
+            rm -f "README.md"
+            echo "Deleted: README.md"
+          fi
 
-          git push origin "HEAD:${TARGET_BRANCH}"
+          # 5. Remove empty workflow directories only
+          if [ -d ".github/workflows" ]; then
+            rmdir ".github/workflows" 2>/dev/null || true
+          fi
+
+          if [ -d ".github" ]; then
+            rmdir ".github" 2>/dev/null || true
+          fi
 
           echo "======================================"
-          echo "DCM PROJECT DELETION SUCCESSFUL"
+          echo "DCM repository structure deletion completed."
           echo "======================================"
-          echo "Schema: ${SCHEMA_NAME}"
-          echo "Project: ${PROJECT_DIR}"
-          echo "Branch: ${TARGET_BRANCH}"
-          echo "Repository README: Updated"
-          echo "Changes committed and pushed successfully."
