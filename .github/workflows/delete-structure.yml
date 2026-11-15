@@ -49,41 +49,48 @@ jobs:
 
           echo "Schema name validated: ${SCHEMA_NAME}"
 
-      - name: Delete DCM project structure
+      - name: Delete DCM project and GitHub workflows
         shell: bash
         env:
           SCHEMA_NAME: ${{ inputs.schema_name }}
         run: |
           set -e
 
-          # Generate project directory from schema name
           PROJECT_DIR="DCM_${SCHEMA_NAME}"
 
           echo "======================================"
-          echo "Deleting Snowflake DCM project"
+          echo "Deleting Snowflake DCM project structure"
           echo "Project: ${PROJECT_DIR}"
           echo "Schema: ${SCHEMA_NAME}"
           echo "======================================"
 
-          # Verify project directory exists
+          # Verify selected DCM project exists
           if [ ! -d "${PROJECT_DIR}" ]; then
             echo "ERROR: Project directory does not exist: ${PROJECT_DIR}"
             exit 1
           fi
 
-          # Delete selected DCM project directory only
+          # Delete selected DCM project directory
           rm -rf -- "${PROJECT_DIR}"
-
           echo "Deleted project directory: ${PROJECT_DIR}"
 
-          # Preserve shared repository files:
-          # - README.md
-          # - .github/workflows/bootstrap-structure.yml
-          # - .github/workflows/delete-structure.yml
-          # - .github/workflows/dcm-plan.yml
-          # - .github/workflows/dcm-deploy.yml
+          # Delete all GitHub workflow files
+          if [ -d ".github/workflows" ]; then
+            rm -rf -- ".github/workflows"
+            echo "Deleted .github/workflows directory and all workflow files."
+          else
+            echo ".github/workflows directory does not exist."
+          fi
 
-          echo "DCM project structure deletion completed."
+          # Remove .github directory if empty
+          if [ -d ".github" ] && [ -z "$(ls -A .github)" ]; then
+            rmdir .github
+            echo "Deleted empty .github directory."
+          fi
+
+          echo "======================================"
+          echo "Deletion completed."
+          echo "======================================"
 
       - name: Commit and push deletion
         shell: bash
@@ -102,7 +109,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "No files to delete."
           else
-            git commit -m "Remove DCM project for ${SCHEMA_NAME}"
+            git commit -m "Remove DCM project and GitHub workflows for ${SCHEMA_NAME}"
 
             git push origin "HEAD:${TARGET_BRANCH}"
 
