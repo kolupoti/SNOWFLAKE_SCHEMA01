@@ -15,9 +15,8 @@ on:
           - prod
 
       schema_name:
-        description: "Snowflake schema name"
+        description: "Enter the Snowflake schema name to delete (e.g., TPCH_SF1, SALES, FINANCE)"
         required: true
-        default: "TPCH_SF1"
         type: string
 
 permissions:
@@ -35,6 +34,21 @@ jobs:
           token: ${{ secrets.BOOTSTRAP_TOKEN }}
           fetch-depth: 0
 
+      - name: Validate schema name
+        shell: bash
+        env:
+          SCHEMA_NAME: ${{ inputs.schema_name }}
+        run: |
+          set -e
+
+          if [[ ! "${SCHEMA_NAME}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+            echo "ERROR: Invalid schema name: ${SCHEMA_NAME}"
+            echo "Use letters, numbers and underscores."
+            exit 1
+          fi
+
+          echo "Schema name validated: ${SCHEMA_NAME}"
+
       - name: Delete DCM project structure
         shell: bash
         env:
@@ -51,26 +65,23 @@ jobs:
           echo "Schema: ${SCHEMA_NAME}"
           echo "======================================"
 
-          # Validate project directory name
-          if [[ ! "${SCHEMA_NAME}" =~ ^[A-Za-z0-9_]+$ ]]; then
-            echo "ERROR: Invalid schema name."
+          # Verify project directory exists
+          if [ ! -d "${PROJECT_DIR}" ]; then
+            echo "ERROR: Project directory does not exist: ${PROJECT_DIR}"
             exit 1
           fi
 
-          # Delete complete DCM project directory
-          if [ -d "${PROJECT_DIR}" ]; then
-            rm -rf "${PROJECT_DIR}"
-            echo "Deleted project directory: ${PROJECT_DIR}"
-          else
-            echo "Project directory does not exist: ${PROJECT_DIR}"
-          fi
+          # Delete selected DCM project directory only
+          rm -rf -- "${PROJECT_DIR}"
 
-          # Delete supporting DCM workflows
-          rm -f ".github/workflows/dcm-plan.yml"
-          rm -f ".github/workflows/dcm-deploy.yml"
+          echo "Deleted project directory: ${PROJECT_DIR}"
 
-          # Delete repository README created by bootstrap
-          rm -f "README.md"
+          # Preserve shared repository files:
+          # - README.md
+          # - .github/workflows/bootstrap-structure.yml
+          # - .github/workflows/delete-structure.yml
+          # - .github/workflows/dcm-plan.yml
+          # - .github/workflows/dcm-deploy.yml
 
           echo "DCM project structure deletion completed."
 
@@ -78,6 +89,7 @@ jobs:
         shell: bash
         env:
           TARGET_BRANCH: ${{ inputs.target_branch }}
+          SCHEMA_NAME: ${{ inputs.schema_name }}
         run: |
           set -e
 
@@ -90,7 +102,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "No files to delete."
           else
-            git commit -m "Remove Snowflake DCM project structure"
+            git commit -m "Remove DCM project for ${SCHEMA_NAME}"
 
             git push origin "HEAD:${TARGET_BRANCH}"
 
