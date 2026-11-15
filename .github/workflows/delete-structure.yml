@@ -1,11 +1,11 @@
 
-name: Delete Snowflake Repository Structure
+name: Delete Snowflake DCM Project Structure
 
 on:
   workflow_dispatch:
     inputs:
       target_branch:
-        description: "Branch from which the structure should be deleted"
+        description: "Branch from which the DCM project structure should be deleted"
         required: true
         type: choice
         options:
@@ -15,9 +15,9 @@ on:
           - prod
 
       schema_name:
-        description: "Snowflake schema folder to delete"
+        description: "Snowflake schema name"
         required: true
-        default: "SCHEMA01"
+        default: "TPCH_SF1"
         type: string
 
 permissions:
@@ -35,28 +35,44 @@ jobs:
           token: ${{ secrets.BOOTSTRAP_TOKEN }}
           fetch-depth: 0
 
-      - name: Delete repository structure
+      - name: Delete DCM project structure
         shell: bash
         env:
-          SCHEMA: ${{ inputs.schema_name }}
+          SCHEMA_NAME: ${{ inputs.schema_name }}
         run: |
           set -e
 
-          BASE="database/${SCHEMA}"
+          # Generate project directory from schema name
+          PROJECT_DIR="DCM_${SCHEMA_NAME}"
 
-          echo "Deleting ${BASE}"
+          echo "======================================"
+          echo "Deleting Snowflake DCM project"
+          echo "Project: ${PROJECT_DIR}"
+          echo "Schema: ${SCHEMA_NAME}"
+          echo "======================================"
 
-          if [ -d "${BASE}" ]; then
-            rm -rf "${BASE}"
+          # Validate project directory name
+          if [[ ! "${SCHEMA_NAME}" =~ ^[A-Za-z0-9_]+$ ]]; then
+            echo "ERROR: Invalid schema name."
+            exit 1
           fi
 
-          # Delete supporting files created by bootstrap
-          rm -f manifest.yml
-          rm -f README.md
-          rm -f .gitignore
-          rm -f .github/workflows/deploy.yml
+          # Delete complete DCM project directory
+          if [ -d "${PROJECT_DIR}" ]; then
+            rm -rf "${PROJECT_DIR}"
+            echo "Deleted project directory: ${PROJECT_DIR}"
+          else
+            echo "Project directory does not exist: ${PROJECT_DIR}"
+          fi
 
-          echo "Repository structure deletion completed."
+          # Delete supporting DCM workflows
+          rm -f ".github/workflows/dcm-plan.yml"
+          rm -f ".github/workflows/dcm-deploy.yml"
+
+          # Delete repository README created by bootstrap
+          rm -f "README.md"
+
+          echo "DCM project structure deletion completed."
 
       - name: Commit and push deletion
         shell: bash
@@ -74,6 +90,9 @@ jobs:
           if git diff --cached --quiet; then
             echo "No files to delete."
           else
-            git commit -m "Remove Snowflake repository structure"
-            git push origin HEAD:${TARGET_BRANCH}
+            git commit -m "Remove Snowflake DCM project structure"
+
+            git push origin "HEAD:${TARGET_BRANCH}"
+
+            echo "Deletion committed and pushed successfully."
           fi
