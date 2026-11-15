@@ -67,8 +67,7 @@ Each DCM project has independent environment targets.
 
 The following DCM projects are present in this repository:
 
-- **TPCH_SF1** - `DCM_TPCH_SF1`
-
+- No DCM projects are currently configured in this repository.
 
 Each project has its own manifest.yml, README.md,
 SQL definitions and reusable macros.
