@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       target_branch:
-        description: "Branch from which the complete DCM structure should be deleted"
+        description: "Branch from which the DCM project structure should be deleted"
         required: true
         type: choice
         options:
@@ -33,7 +33,7 @@ jobs:
       # --------------------------------------------------
 
       - name: Checkout target branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ inputs.target_branch }}
           token: ${{ secrets.BOOTSTRAP_TOKEN }}
@@ -101,6 +101,8 @@ jobs:
           if [ -f ".github/workflows/dcm-plan.yml" ]; then
             rm -f -- ".github/workflows/dcm-plan.yml"
             echo "Deleted: .github/workflows/dcm-plan.yml"
+          else
+            echo "DCM Plan workflow not found."
           fi
 
           # ----------------------------------------------
@@ -110,6 +112,8 @@ jobs:
           if [ -f ".github/workflows/dcm-deploy.yml" ]; then
             rm -f -- ".github/workflows/dcm-deploy.yml"
             echo "Deleted: .github/workflows/dcm-deploy.yml"
+          else
+            echo "DCM Deploy workflow not found."
           fi
 
           # ----------------------------------------------
@@ -119,14 +123,16 @@ jobs:
           if [ -f "README.md" ]; then
             rm -f -- "README.md"
             echo "Deleted: README.md"
+          else
+            echo "Repository README not found."
           fi
 
           # ----------------------------------------------
           # 5. REMOVE EMPTY GITHUB DIRECTORIES
           # ----------------------------------------------
 
-          # Preserve bootstrap and delete workflow files.
-          # Remove directories only if they are empty.
+          # Preserve bootstrap-structure.yml
+          # Preserve delete-structure.yml
 
           if [ -d ".github/workflows" ]; then
             rmdir ".github/workflows" 2>/dev/null || true
@@ -137,7 +143,7 @@ jobs:
           fi
 
           echo "=========================================="
-          echo "Requested DCM structure deletion completed."
+          echo "DCM structure deletion completed."
           echo "=========================================="
 
       # --------------------------------------------------
@@ -153,44 +159,58 @@ jobs:
 
           PROJECT_DIR="DCM_${SCHEMA_NAME}"
 
+          echo "=========================================="
           echo "Verifying deleted files..."
+          echo "=========================================="
 
           FAILED=0
 
-          # Verify project directory
+          # Verify DCM project directory
           if [ -e "${PROJECT_DIR}" ]; then
             echo "ERROR: ${PROJECT_DIR} still exists."
             FAILED=1
+          else
+            echo "PASS: DCM project directory deleted."
           fi
 
           # Verify DCM Plan workflow
           if [ -e ".github/workflows/dcm-plan.yml" ]; then
             echo "ERROR: dcm-plan.yml still exists."
             FAILED=1
+          else
+            echo "PASS: dcm-plan.yml deleted."
           fi
 
           # Verify DCM Deploy workflow
           if [ -e ".github/workflows/dcm-deploy.yml" ]; then
             echo "ERROR: dcm-deploy.yml still exists."
             FAILED=1
+          else
+            echo "PASS: dcm-deploy.yml deleted."
           fi
 
           # Verify root README
           if [ -e "README.md" ]; then
             echo "ERROR: README.md still exists."
             FAILED=1
+          else
+            echo "PASS: Root README.md deleted."
           fi
 
-          # Verify Bootstrap workflow is preserved
+          # Verify Bootstrap workflow preserved
           if [ ! -f ".github/workflows/bootstrap-structure.yml" ]; then
             echo "ERROR: bootstrap-structure.yml is missing."
             FAILED=1
+          else
+            echo "PASS: bootstrap-structure.yml preserved."
           fi
 
-          # Verify Delete workflow is preserved
+          # Verify Delete workflow preserved
           if [ ! -f ".github/workflows/delete-structure.yml" ]; then
             echo "ERROR: delete-structure.yml is missing."
             FAILED=1
+          else
+            echo "PASS: delete-structure.yml preserved."
           fi
 
           if [ "${FAILED}" -ne 0 ]; then
@@ -198,8 +218,9 @@ jobs:
             exit 1
           fi
 
-          echo "All requested files have been deleted."
-          echo "Bootstrap and Delete workflows are preserved."
+          echo "=========================================="
+          echo "All deletion checks passed."
+          echo "=========================================="
 
       # --------------------------------------------------
       # 5. COMMIT AND PUSH DELETION
@@ -217,7 +238,7 @@ jobs:
           git config user.email \
             "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # Stage all deletions and modifications
+          # Stage all repository deletions and changes
           git add -A
 
           if git diff --cached --quiet; then
@@ -234,10 +255,10 @@ jobs:
             echo "=========================================="
 
             echo "Deleted:"
-            echo "- ${SCHEMA_NAME} DCM project directory"
+            echo "- DCM_${SCHEMA_NAME}/"
             echo "- .github/workflows/dcm-plan.yml"
             echo "- .github/workflows/dcm-deploy.yml"
-            echo "- Root README.md"
+            echo "- README.md"
 
             echo ""
             echo "Preserved:"
