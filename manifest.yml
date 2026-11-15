@@ -1,3 +1,0 @@
-schema: SCHEMA01
-database: YOUR_DATABASE_NAME
-deployment_tool: snowflake-dcm
