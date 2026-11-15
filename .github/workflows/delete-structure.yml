@@ -1,54 +1,4 @@
 
-name: Delete Snowflake DCM Project Structure
-
-on:
-  workflow_dispatch:
-    inputs:
-      target_branch:
-        description: "Branch from which the DCM project structure should be deleted"
-        required: true
-        type: choice
-        options:
-          - dev
-          - qa
-          - uat
-          - prod
-
-      schema_name:
-        description: "Enter the Snowflake schema name to delete (e.g., TPCH_SF1, SALES, FINANCE)"
-        required: true
-        type: string
-
-permissions:
-  contents: write
-
-jobs:
-  delete-structure:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout target branch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.target_branch }}
-          token: ${{ secrets.BOOTSTRAP_TOKEN }}
-          fetch-depth: 0
-
-      - name: Validate schema name
-        shell: bash
-        env:
-          SCHEMA_NAME: ${{ inputs.schema_name }}
-        run: |
-          set -e
-
-          if [[ ! "${SCHEMA_NAME}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
-            echo "ERROR: Invalid schema name: ${SCHEMA_NAME}"
-            echo "Use letters, numbers and underscores."
-            exit 1
-          fi
-
-          echo "Schema name validated: ${SCHEMA_NAME}"
-
       - name: Delete DCM project and GitHub workflows
         shell: bash
         env:
@@ -58,60 +8,28 @@ jobs:
 
           PROJECT_DIR="DCM_${SCHEMA_NAME}"
 
-          echo "======================================"
-          echo "Deleting Snowflake DCM project structure"
-          echo "Project: ${PROJECT_DIR}"
-          echo "Schema: ${SCHEMA_NAME}"
-          echo "======================================"
+          echo "Deleting DCM project: ${PROJECT_DIR}"
 
-          # Verify selected DCM project exists
-          if [ ! -d "${PROJECT_DIR}" ]; then
-            echo "ERROR: Project directory does not exist: ${PROJECT_DIR}"
-            exit 1
-          fi
-
-          # Delete selected DCM project directory
-          rm -rf -- "${PROJECT_DIR}"
-          echo "Deleted project directory: ${PROJECT_DIR}"
-
-          # Delete all GitHub workflow files
-          if [ -d ".github/workflows" ]; then
-            rm -rf -- ".github/workflows"
-            echo "Deleted .github/workflows directory and all workflow files."
+          # Delete selected DCM project
+          if [ -d "${PROJECT_DIR}" ]; then
+            rm -rf -- "${PROJECT_DIR}"
+            echo "Deleted ${PROJECT_DIR}"
           else
-            echo ".github/workflows directory does not exist."
+            echo "Project directory not found: ${PROJECT_DIR}"
           fi
 
-          # Remove .github directory if empty
+          # Delete .github/workflows unconditionally if it exists
+          if [ -e ".github/workflows" ] || [ -L ".github/workflows" ]; then
+            rm -rf -- ".github/workflows"
+            echo "Successfully deleted .github/workflows and all its contents."
+          else
+            echo ".github/workflows does not exist."
+          fi
+
+          # Delete .github if it is now empty
           if [ -d ".github" ] && [ -z "$(ls -A .github)" ]; then
             rmdir .github
-            echo "Deleted empty .github directory."
+            echo "Successfully deleted empty .github directory."
           fi
 
-          echo "======================================"
           echo "Deletion completed."
-          echo "======================================"
-
-      - name: Commit and push deletion
-        shell: bash
-        env:
-          TARGET_BRANCH: ${{ inputs.target_branch }}
-          SCHEMA_NAME: ${{ inputs.schema_name }}
-        run: |
-          set -e
-
-          git config user.name "github-actions[bot]"
-          git config user.email \
-            "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add -A
-
-          if git diff --cached --quiet; then
-            echo "No files to delete."
-          else
-            git commit -m "Remove DCM project and GitHub workflows for ${SCHEMA_NAME}"
-
-            git push origin "HEAD:${TARGET_BRANCH}"
-
-            echo "Deletion committed and pushed successfully."
-          fi
