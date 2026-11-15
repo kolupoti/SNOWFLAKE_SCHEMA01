@@ -1,11 +1,11 @@
 
-name: Bootstrap Snowflake Repository Structure
+name: Bootstrap Snowflake DCM Project Structure
 
 on:
   workflow_dispatch:
     inputs:
       target_branch:
-        description: "Branch where the structure should be created"
+        description: "Branch where the DCM project structure should be created"
         required: true
         type: choice
         options:
@@ -17,7 +17,7 @@ on:
       schema_name:
         description: "Snowflake schema name"
         required: true
-        default: "SCHEMA01"
+        default: "TPCH_SF1"
         type: string
 
 permissions:
@@ -35,73 +35,97 @@ jobs:
           token: ${{ secrets.BOOTSTRAP_TOKEN }}
           fetch-depth: 0
 
-      - name: Create standard folders
+      - name: Create DCM project structure
         shell: bash
+        env:
+          SCHEMA_NAME: ${{ inputs.schema_name }}
         run: |
           set -e
 
-          SCHEMA="${{ inputs.schema_name }}"
-          BASE="database/${SCHEMA}"
+          PROJECT_DIR="DCM_TPCH_SF1"
 
-          FOLDERS=(
-            "tables"
-            "views"
-            "procedures"
-            "functions"
-            "streams"
-            "tasks"
-            "stages"
-            "grants"
-            "streamlit"
-            "skills"
-          )
+          echo "Creating Snowflake DCM project: ${PROJECT_DIR}"
+          echo "Snowflake schema: ${SCHEMA_NAME}"
 
-          for folder in "${FOLDERS[@]}"; do
-            mkdir -p "${BASE}/${folder}"
-            touch "${BASE}/${folder}/.gitkeep"
-          done
+          # Create DCM project directories
+          mkdir -p "${PROJECT_DIR}/sources/definitions"
+          mkdir -p "${PROJECT_DIR}/sources/macros"
 
+          # Create GitHub workflow directory
           mkdir -p ".github/workflows"
 
-          # Create manifest only if it does not exist
-          if [ ! -f manifest.yml ]; then
-            cat > manifest.yml <<EOF
-          schema: ${SCHEMA}
-          database: YOUR_DATABASE_NAME
-          deployment_tool: snowflake-dcm
+          # Create manifest.yml only if it does not exist
+          if [ ! -f "${PROJECT_DIR}/manifest.yml" ]; then
+            cat > "${PROJECT_DIR}/manifest.yml" <<EOF
+          # Snowflake schema: ${SCHEMA_NAME}
+
+          manifest_version: 2
+          type: DCM_PROJECT
+
+          default_target: DEV
+
+          targets:
+
+            DEV:
+              account_identifier: YOUR_SNOWFLAKE_ACCOUNT
+              project_name: YOUR_DATABASE.YOUR_SCHEMA.DCM_TPCH_SF1_DEV
+              project_owner: DCM_TPCH_SF1_DEPLOYER
+              templating_config: DEV
+
+            QA:
+              account_identifier: YOUR_SNOWFLAKE_ACCOUNT
+              project_name: YOUR_DATABASE.YOUR_SCHEMA.DCM_TPCH_SF1_QA
+              project_owner: DCM_TPCH_SF1_DEPLOYER
+              templating_config: QA
+
+            UAT:
+              account_identifier: YOUR_SNOWFLAKE_ACCOUNT
+              project_name: YOUR_DATABASE.YOUR_SCHEMA.DCM_TPCH_SF1_UAT
+              project_owner: DCM_TPCH_SF1_DEPLOYER
+              templating_config: UAT
+
+            PROD:
+              account_identifier: YOUR_SNOWFLAKE_ACCOUNT
+              project_name: YOUR_DATABASE.YOUR_SCHEMA.DCM_TPCH_SF1_PROD
+              project_owner: DCM_TPCH_SF1_DEPLOYER
+              templating_config: PROD
           EOF
           fi
 
-          # Create README only if it does not exist
-          if [ ! -f README.md ]; then
-            cat > README.md <<EOF
-          # Snowflake ${SCHEMA}
+          # Create SQL definition files
+          declare -A SQL_FILES=(
+            ["database.sql"]="Database definitions"
+            ["schema.sql"]="Schema definitions"
+            ["tables.sql"]="Table definitions"
+            ["views.sql"]="View definitions"
+            ["procedures.sql"]="Stored procedure definitions"
+            ["functions.sql"]="Function definitions"
+            ["streams.sql"]="Stream definitions"
+            ["tasks.sql"]="Task definitions"
+            ["grants.sql"]="Grant definitions"
+            ["streamlit.sql"]="Streamlit definitions"
+          )
 
-          Schema-specific Snowflake database objects.
+          for file in "${!SQL_FILES[@]}"; do
+            FILE_PATH="${PROJECT_DIR}/sources/definitions/${file}"
 
-          ## Folder Structure
+            if [ ! -f "${FILE_PATH}" ]; then
+              echo "-- ${SQL_FILES[$file]}" > "${FILE_PATH}"
+              echo "-- Add Snowflake DCM SQL definitions here." >> "${FILE_PATH}"
+            fi
+          done
 
-          - tables
-          - views
-          - procedures
-          - functions
-          - streams
-          - tasks
-          - stages
-          - grants
-          - streamlit
-          - skills
-
-          ## Deployment
-
-          Deployment is managed through Snowflake DCM
-          and GitHub Actions.
+          # Create common SQL macro
+          if [ ! -f "${PROJECT_DIR}/sources/macros/common.sql" ]; then
+            cat > "${PROJECT_DIR}/sources/macros/common.sql" <<'EOF'
+          -- Common reusable SQL macros
+          -- Add project-level reusable macros here.
           EOF
           fi
 
-          # Create .gitignore only if it does not exist
-          if [ ! -f .gitignore ]; then
-            cat > .gitignore <<'EOF'
+          # Create project-level .gitignore
+          if [ ! -f "${PROJECT_DIR}/.gitignore" ]; then
+            cat > "${PROJECT_DIR}/.gitignore" <<'EOF'
           .DS_Store
           *.log
           *.tmp
@@ -111,37 +135,111 @@ jobs:
           EOF
           fi
 
-          # Create deployment workflow placeholder
-          if [ ! -f .github/workflows/deploy.yml ]; then
-            cat > .github/workflows/deploy.yml <<'EOF'
-          name: Snowflake Deployment
+          # Create DCM project README
+          if [ ! -f "${PROJECT_DIR}/README.md" ]; then
+            cat > "${PROJECT_DIR}/README.md" <<'EOF'
+          # DCM_TPCH_SF1
+
+          Snowflake Data Cloud Management (DCM) project.
+
+          ## Project Structure
+
+          - manifest.yml - DCM project configuration and deployment targets.
+          - sources/definitions/ - Snowflake SQL definitions.
+          - sources/macros/ - Reusable SQL macros.
+
+          ## Supported Environments
+
+          - DEV
+          - QA
+          - UAT
+          - PROD
+
+          ## Deployment
+
+          DCM project deployments are managed through
+          Snowflake DCM and GitHub Actions.
+
+          Review the manifest.yml and environment configurations
+          before executing deployments.
+          EOF
+          fi
+
+          # Create DCM Plan workflow placeholder
+          if [ ! -f ".github/workflows/dcm-plan.yml" ]; then
+            cat > ".github/workflows/dcm-plan.yml" <<'EOF'
+          name: Snowflake DCM Plan
 
           on:
             workflow_dispatch:
 
           jobs:
-            deployment:
+            dcm-plan:
               runs-on: ubuntu-latest
               steps:
-                - name: Deployment placeholder
-                  run: echo "Configure Snowflake DCM deployment here"
+                - name: Checkout repository
+                  uses: actions/checkout@v4
+
+                - name: DCM Plan
+                  run: echo "Configure Snowflake DCM plan command here"
+          EOF
+          fi
+
+          # Create DCM Deploy workflow placeholder
+          if [ ! -f ".github/workflows/dcm-deploy.yml" ]; then
+            cat > ".github/workflows/dcm-deploy.yml" <<'EOF'
+          name: Snowflake DCM Deploy
+
+          on:
+            workflow_dispatch:
+
+          jobs:
+            dcm-deploy:
+              runs-on: ubuntu-latest
+              steps:
+                - name: Checkout repository
+                  uses: actions/checkout@v4
+
+                - name: DCM Deploy
+                  run: echo "Configure Snowflake DCM deploy command here"
+          EOF
+          fi
+
+          # Create repository-level README
+          if [ ! -f "README.md" ]; then
+            cat > "README.md" <<'EOF'
+          # SNOWFLAKE_TPCH_SF1
+
+          Snowflake DCM Git repository.
+
+          ## DCM Projects
+
+          - DCM_TPCH_SF1
+
+          ## GitHub Actions
+
+          - dcm-plan.yml
+          - dcm-deploy.yml
+          - bootstrap-structure.yml
           EOF
           fi
 
       - name: Commit and push structure
         shell: bash
+        env:
+          TARGET_BRANCH: ${{ inputs.target_branch }}
         run: |
+          set -e
+
           git config user.name "github-actions[bot]"
           git config user.email \
             "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add database manifest.yml README.md \
-            .gitignore .github/workflows
+          git add -A
 
           if git diff --cached --quiet; then
-            echo "No changes required."
+            echo "No changes required. Repository structure already exists."
           else
-            git commit -m "Initialize standard Snowflake repository structure"
-            git push origin HEAD:${{ inputs.target_branch }}
+            git commit -m "Initialize Snowflake DCM project structure"
+            git push origin "HEAD:${TARGET_BRANCH}"
           fi
-
