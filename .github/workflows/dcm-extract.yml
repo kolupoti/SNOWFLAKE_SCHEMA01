@@ -1,0 +1,434 @@
+
+name: Snowflake DCM Extract Object Definitions
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: "Git branch where extracted definitions should be committed"
+        required: true
+        type: choice
+        options:
+          - dev
+          - qa
+          - uat
+          - prod
+
+      database_name:
+        description: "Snowflake database name"
+        required: true
+        type: string
+
+      schema_name:
+        description: "Snowflake schema name"
+        required: true
+        type: string
+
+      confirm_extract:
+        description: "Type EXTRACT to confirm extraction"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  extract-definitions:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # --------------------------------------------------
+      # 1. CHECKOUT TARGET BRANCH
+      # --------------------------------------------------
+
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_branch }}
+          token: ${{ secrets.BOOTSTRAP_TOKEN }}
+          fetch-depth: 0
+
+      # --------------------------------------------------
+      # 2. VALIDATE INPUTS
+      # --------------------------------------------------
+
+      - name: Validate extraction inputs
+        shell: bash
+        env:
+          DATABASE_NAME: ${{ inputs.database_name }}
+          SCHEMA_NAME: ${{ inputs.schema_name }}
+          CONFIRM_EXTRACT: ${{ inputs.confirm_extract }}
+        run: |
+          set -e
+
+          if [[ ! "${DATABASE_NAME}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+            echo "::error::Invalid database name."
+            exit 1
+          fi
+
+          if [[ ! "${SCHEMA_NAME}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+            echo "::error::Invalid schema name."
+            exit 1
+          fi
+
+          if [[ "${CONFIRM_EXTRACT}" != "EXTRACT" ]]; then
+            echo "::error::You must enter EXTRACT to continue."
+            exit 1
+          fi
+
+          echo "Database: ${DATABASE_NAME}"
+          echo "Schema: ${SCHEMA_NAME}"
+          echo "Extraction confirmation successful."
+
+      # --------------------------------------------------
+      # 3. SET UP PYTHON
+      # --------------------------------------------------
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # --------------------------------------------------
+      # 4. INSTALL SNOWFLAKE CONNECTOR
+      # --------------------------------------------------
+
+      - name: Install Snowflake Python Connector
+        run: |
+          python -m pip install --upgrade pip
+          pip install snowflake-connector-python
+
+      # --------------------------------------------------
+      # 5. EXTRACT SNOWFLAKE OBJECT DEFINITIONS
+      # --------------------------------------------------
+
+      - name: Extract Snowflake object definitions
+        shell: bash
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+          SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+
+          DATABASE_NAME: ${{ inputs.database_name }}
+          SCHEMA_NAME: ${{ inputs.schema_name }}
+
+        run: |
+          set -e
+
+          PROJECT_DIR="DCM_${SCHEMA_NAME}"
+          DEFINITIONS_DIR="${PROJECT_DIR}/sources/definitions"
+
+          if [[ ! -d "${DEFINITIONS_DIR}" ]]; then
+            echo "::error::DCM project directory does not exist: ${PROJECT_DIR}"
+            echo "Run the Bootstrap workflow first."
+            exit 1
+          fi
+
+          mkdir -p "${DEFINITIONS_DIR}"
+
+          python <<'PY'
+          import os
+          import re
+          import sys
+          from pathlib import Path
+
+          import snowflake.connector
+
+          database = os.environ["DATABASE_NAME"]
+          schema = os.environ["SCHEMA_NAME"]
+
+          project_dir = Path(f"DCM_{schema}")
+          output_dir = project_dir / "sources" / "definitions"
+
+          def quote_identifier(value):
+              return '"' + value.replace('"', '""') + '"'
+
+          qualified_schema = (
+              f"{quote_identifier(database)}."
+              f"{quote_identifier(schema)}"
+          )
+
+          print(f"Connecting to Snowflake...")
+          print(f"Extracting: {database}.{schema}")
+
+          connection = snowflake.connector.connect(
+              account=os.environ["SNOWFLAKE_ACCOUNT"],
+              user=os.environ["SNOWFLAKE_USER"],
+              password=os.environ["SNOWFLAKE_PASSWORD"],
+              role=os.environ["SNOWFLAKE_ROLE"],
+              warehouse=os.environ["SNOWFLAKE_WAREHOUSE"],
+              database=database,
+              schema=schema
+          )
+
+          cursor = connection.cursor()
+
+          def get_rows(command):
+              cursor.execute(command)
+
+              columns = [
+                  column[0].lower()
+                  for column in cursor.description
+              ]
+
+              return [
+                  dict(zip(columns, row))
+                  for row in cursor.fetchall()
+              ]
+
+          def extract_ddl(object_type, object_name):
+              cursor.execute(
+                  "SELECT GET_DDL(%s, %s, TRUE)",
+                  (object_type, object_name)
+              )
+
+              result = cursor.fetchone()
+
+              if not result or not result[0]:
+                  return None
+
+              ddl = result[0].strip()
+
+              # Convert supported CREATE statements to DCM DEFINE.
+              ddl = re.sub(
+                  r"\bCREATE\s+(?:OR\s+REPLACE\s+)?",
+                  "DEFINE ",
+                  ddl,
+                  count=1,
+                  flags=re.IGNORECASE
+              )
+
+              return ddl.rstrip(";") + ";"
+
+          def get_signature(arguments):
+              if not arguments:
+                  return ""
+
+              match = re.search(r"\((.*?)\)", arguments)
+
+              if match:
+                  return "(" + match.group(1) + ")"
+
+              return ""
+
+          extraction_groups = [
+              {
+                  "label": "TABLES",
+                  "show": f"SHOW TABLES IN SCHEMA {qualified_schema}",
+                  "ddl_type": "TABLE",
+                  "file": "tables_extracted.sql",
+                  "signature": False
+              },
+              {
+                  "label": "VIEWS",
+                  "show": f"SHOW VIEWS IN SCHEMA {qualified_schema}",
+                  "ddl_type": "VIEW",
+                  "file": "views_extracted.sql",
+                  "signature": False
+              },
+              {
+                  "label": "PROCEDURES",
+                  "show": f"SHOW PROCEDURES IN SCHEMA {qualified_schema}",
+                  "ddl_type": "PROCEDURE",
+                  "file": "procedures_extracted.sql",
+                  "signature": True
+              },
+              {
+                  "label": "FUNCTIONS",
+                  "show": f"SHOW USER FUNCTIONS IN SCHEMA {qualified_schema}",
+                  "ddl_type": "FUNCTION",
+                  "file": "functions_extracted.sql",
+                  "signature": True
+              },
+              {
+                  "label": "STREAMS",
+                  "show": f"SHOW STREAMS IN SCHEMA {qualified_schema}",
+                  "ddl_type": "STREAM",
+                  "file": "streams_extracted.sql",
+                  "signature": False
+              },
+              {
+                  "label": "TASKS",
+                  "show": f"SHOW TASKS IN SCHEMA {qualified_schema}",
+                  "ddl_type": "TASK",
+                  "file": "tasks_extracted.sql",
+                  "signature": False
+              }
+          ]
+
+          total_objects = 0
+
+          try:
+
+              for group in extraction_groups:
+
+                  print(f"\nExtracting {group['label']}...")
+
+                  objects = get_rows(group["show"])
+
+                  definitions = []
+
+                  for obj in objects:
+
+                      name = obj.get("name")
+
+                      if not name:
+                          continue
+
+                      object_name = (
+                          f"{qualified_schema}."
+                          f"{quote_identifier(name)}"
+                      )
+
+                      if group["signature"]:
+                          signature = get_signature(
+                              obj.get("arguments")
+                          )
+
+                          if not signature:
+                              print(
+                                  f"Skipping {name}: "
+                                  "unable to identify argument signature."
+                              )
+                              continue
+
+                          object_name += signature
+
+                      ddl = extract_ddl(
+                          group["ddl_type"],
+                          object_name
+                      )
+
+                      if ddl:
+                          definitions.append(
+                              f"-- Extracted {group['label']}: {name}\n"
+                              f"{ddl}\n"
+                          )
+
+                          total_objects += 1
+
+                          print(f"Extracted: {name}")
+
+                  output_file = output_dir / group["file"]
+
+                  header = (
+                      f"-- Generated Snowflake DCM definitions\n"
+                      f"-- Database: {database}\n"
+                      f"-- Schema: {schema}\n"
+                      f"-- Object type: {group['label']}\n"
+                      f"-- Review definitions before deployment.\n\n"
+                  )
+
+                  if definitions:
+                      output_file.write_text(
+                          header + "\n".join(definitions),
+                          encoding="utf-8"
+                      )
+
+                      print(
+                          f"Created {output_file}: "
+                          f"{len(definitions)} objects"
+                      )
+                  else:
+                      print(
+                          f"No {group['label']} found. "
+                          "No generated file written."
+                      )
+
+              print("\n--------------------------------")
+              print(f"Total extracted objects: {total_objects}")
+              print("--------------------------------")
+
+              if total_objects == 0:
+                  print("No supported objects were extracted.")
+
+          finally:
+              cursor.close()
+              connection.close()
+
+          PY
+
+      # --------------------------------------------------
+      # 6. CREATE GRANTS EXTRACTION PLACEHOLDER
+      # --------------------------------------------------
+
+      - name: Prepare grants review file
+        shell: bash
+        env:
+          SCHEMA_NAME: ${{ inputs.schema_name }}
+        run: |
+          set -e
+
+          FILE="DCM_${SCHEMA_NAME}/sources/definitions/grants_extracted.sql"
+
+          if [[ ! -f "${FILE}" ]]; then
+            cat > "${FILE}" <<EOF
+          -- Snowflake DCM Grants
+          -- Schema: ${SCHEMA_NAME}
+          --
+          -- Review and add DCM-supported GRANT statements here.
+          --
+          -- Object privileges and role grants must be reviewed
+          -- before managing them through DCM.
+          --
+          -- This file is intentionally not populated automatically.
+          EOF
+          fi
+
+          echo "Grants review file prepared."
+
+      # --------------------------------------------------
+      # 7. VERIFY GENERATED DEFINITIONS
+      # --------------------------------------------------
+
+      - name: Verify extracted definitions
+        shell: bash
+        env:
+          SCHEMA_NAME: ${{ inputs.schema_name }}
+        run: |
+          set -e
+
+          DEFINITIONS_DIR="DCM_${SCHEMA_NAME}/sources/definitions"
+
+          echo "Generated definition files:"
+
+          find "${DEFINITIONS_DIR}" \
+            -maxdepth 1 \
+            -type f \
+            -name '*_extracted.sql' \
+            -print
+
+          echo "Extraction verification completed."
+
+      # --------------------------------------------------
+      # 8. COMMIT AND PUSH EXTRACTED DEFINITIONS
+      # --------------------------------------------------
+
+      - name: Commit and push extracted definitions
+        shell: bash
+        env:
+          TARGET_BRANCH: ${{ inputs.target_branch }}
+          SCHEMA_NAME: ${{ inputs.schema_name }}
+        run: |
+          set -e
+
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add "DCM_${SCHEMA_NAME}/sources/definitions/"
+
+          if git diff --cached --quiet; then
+            echo "No extracted definition changes to commit."
+          else
+
+            git commit \
+              -m "Extract Snowflake DCM definitions for ${SCHEMA_NAME}"
+
+            git push origin "HEAD:${TARGET_BRANCH}"
+
+            echo "Successfully committed extracted definitions."
+          fi
