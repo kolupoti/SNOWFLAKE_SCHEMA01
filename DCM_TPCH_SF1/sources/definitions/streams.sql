@@ -1,5 +1,0 @@
--- Stream definitions
--- DCM Project: DCM_TPCH_SF1
--- Snowflake Schema: TPCH_SF1
---
--- Add valid Snowflake DCM SQL definitions here.
