@@ -32,6 +32,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
       # --------------------------------------------------
       # 1. CHECKOUT TARGET BRANCH
       # --------------------------------------------------
@@ -71,7 +72,7 @@ jobs:
           echo "Deletion confirmation successful."
 
       # --------------------------------------------------
-      # 3. DELETE DCM PROJECT STRUCTURE
+      # 3. DELETE DCM PROJECT STRUCTURE AND GENERATED FILES
       # --------------------------------------------------
 
       - name: Delete DCM project structure and generated files
@@ -86,7 +87,7 @@ jobs:
           echo "Preparing to delete DCM project: ${PROJECT_DIR}"
 
           # --------------------------------------------------
-          # Validate project directory
+          # VALIDATE PROJECT DIRECTORY
           # --------------------------------------------------
 
           if [[ ! -d "${PROJECT_DIR}" ]]; then
@@ -121,110 +122,15 @@ jobs:
           fi
 
           # --------------------------------------------------
-          # 4. REGENERATE REPOSITORY PROJECT LIST
-          # --------------------------------------------------
-
-          PROJECT_LIST=""
-
-          for dir in DCM_*; do
-            if [[ -d "${dir}" ]]; then
-              PROJECT_SCHEMA="${dir#DCM_}"
-
-              PROJECT_LIST="${PROJECT_LIST}- **${PROJECT_SCHEMA}** - \`${dir}\`"$'\n'
-            fi
-          done
-
-          # --------------------------------------------------
-          # 5. UPDATE REPOSITORY README
+          # 4. DELETE REPOSITORY-LEVEL README
           # --------------------------------------------------
 
           if [[ -f "README.md" ]]; then
-
-            cat > README.md <<EOF
-          # Snowflake DCM Git Repository
-
-          ## 1. Overview
-
-          This repository provides a centralized Git-based framework
-          for managing Snowflake Data Cloud Management (DCM) Projects.
-
-          Each Snowflake schema is maintained as an independent
-          DCM project directory.
-
-          ## 2. Supported Environments
-
-          | Environment | Git Branch |
-          |---|---|
-          | DEV | dev |
-          | QA | qa |
-          | UAT | uat |
-          | PROD | prod |
-
-          ## 3. Current DCM Projects
-
-          The following DCM projects are currently present
-          in this repository:
-
-          ${PROJECT_LIST}
-
-          ## 4. Project Management
-
-          ### Bootstrap DCM Project
-
-          Use the GitHub Actions workflow:
-
-          \`bootstrap-structure.yml\`
-
-          Provide the target branch and Snowflake schema name
-          to create a new DCM project structure.
-
-          ### Delete DCM Project
-
-          Use the GitHub Actions workflow:
-
-          \`delete-structure.yml\`
-
-          Provide the target branch and Snowflake schema name.
-          Enter DELETE to confirm the removal.
-
-          ## 5. Environment Promotion
-
-          Recommended promotion sequence:
-
-          DEV -> QA -> UAT -> PROD
-
-          Use Pull Requests and appropriate approvals
-          to control environment promotions.
-
-          ## 6. Important Considerations
-
-          - Each schema has an independent DCM project.
-          - Project deletion removes Git repository files.
-          - Deletion does not drop Snowflake DCM projects.
-          - Deletion does not drop Snowflake database objects.
-          - Snowflake resources must be managed separately.
-          - Existing projects are preserved during other
-            schema-specific deletion operations.
-
-          ## 7. Security Guidelines
-
-          - Use GitHub Secrets for authentication.
-          - Never commit Snowflake credentials.
-          - Restrict production branch write access.
-          - Require approvals for sensitive changes.
-
-          ---
-
-          **Framework:** Snowflake DCM with GitHub
-
-          **Supported Environments:** DEV, QA, UAT, PROD
-
-          **Project Strategy:** One independent DCM project per schema
-          EOF
-
+            echo "Deleting repository-level README.md"
+            rm -f "README.md"
           fi
 
-          echo "DCM project deletion and repository documentation update completed."
+          echo "DCM project structure and generated files deleted."
 
       # --------------------------------------------------
       # 4. VERIFY DELETION
@@ -239,22 +145,31 @@ jobs:
 
           PROJECT_DIR="DCM_${SCHEMA_NAME}"
 
+          # Verify project directory
           if [[ -e "${PROJECT_DIR}" ]]; then
             echo "::error::DCM project directory still exists."
             exit 1
           fi
 
+          # Verify DCM Plan workflow
           if [[ -f ".github/workflows/dcm-plan.yml" ]]; then
             echo "::error::dcm-plan.yml still exists."
             exit 1
           fi
 
+          # Verify DCM Deploy workflow
           if [[ -f ".github/workflows/dcm-deploy.yml" ]]; then
             echo "::error::dcm-deploy.yml still exists."
             exit 1
           fi
 
-          echo "Deletion verification completed successfully."
+          # Verify repository README
+          if [[ -f "README.md" ]]; then
+            echo "::error::Repository README.md still exists."
+            exit 1
+          fi
+
+          echo "All designated files and directories successfully deleted."
 
       # --------------------------------------------------
       # 5. COMMIT AND PUSH DELETION
