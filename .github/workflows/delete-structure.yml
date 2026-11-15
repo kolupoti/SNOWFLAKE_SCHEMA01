@@ -33,7 +33,7 @@ jobs:
       # --------------------------------------------------
 
       - name: Checkout target branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.target_branch }}
           token: ${{ secrets.BOOTSTRAP_TOKEN }}
@@ -72,7 +72,7 @@ jobs:
           PROJECT_DIR="DCM_${SCHEMA_NAME}"
 
           echo "=========================================="
-          echo "Deleting DCM project"
+          echo "Starting DCM project deletion"
           echo "Schema: ${SCHEMA_NAME}"
           echo "Project: ${PROJECT_DIR}"
           echo "=========================================="
@@ -85,68 +85,15 @@ jobs:
           fi
 
       # --------------------------------------------------
-      # STEP 4: DELETE GENERATED DCM WORKFLOWS
+      # STEP 4: CHECK REMAINING DCM PROJECTS
       # --------------------------------------------------
 
-      - name: Delete generated DCM Plan and Deploy workflows
+      - name: Check remaining DCM projects
+        id: remaining-projects
         shell: bash
         run: |
           set -e
 
-          # Delete DCM Plan workflow
-          if [ -e ".github/workflows/dcm-plan.yml" ] || \
-             [ -L ".github/workflows/dcm-plan.yml" ]; then
-
-            rm -f -- ".github/workflows/dcm-plan.yml"
-            echo "SUCCESS: Deleted dcm-plan.yml."
-          else
-            echo "INFO: dcm-plan.yml does not exist."
-          fi
-
-          # Delete DCM Deploy workflow
-          if [ -e ".github/workflows/dcm-deploy.yml" ] || \
-             [ -L ".github/workflows/dcm-deploy.yml" ]; then
-
-            rm -f -- ".github/workflows/dcm-deploy.yml"
-            echo "SUCCESS: Deleted dcm-deploy.yml."
-          else
-            echo "INFO: dcm-deploy.yml does not exist."
-          fi
-
-          # Preserve bootstrap-structure.yml and delete-structure.yml.
-          echo "Preserving repository management workflows."
-
-          # Remove empty workflows directory only if applicable
-          if [ -d ".github/workflows" ] && \
-             [ -z "$(ls -A .github/workflows)" ]; then
-
-            rmdir ".github/workflows"
-            echo "SUCCESS: Deleted empty workflows directory."
-          fi
-
-          # Remove .github only when it is empty
-          if [ -d ".github" ] && [ -z "$(ls -A .github)" ]; then
-            rmdir ".github"
-            echo "SUCCESS: Deleted empty .github directory."
-          fi
-
-      # --------------------------------------------------
-      # STEP 5: UPDATE REPOSITORY README
-      # --------------------------------------------------
-
-      - name: Update repository README
-        shell: bash
-        env:
-          SCHEMA_NAME: ${{ inputs.schema_name }}
-        run: |
-          set -e
-
-          PROJECT_DIR="DCM_${SCHEMA_NAME}"
-          PROJECT_ENTRY="- **${SCHEMA_NAME}** - \`${PROJECT_DIR}\`"
-
-          echo "Updating repository README."
-
-          # Check whether other DCM projects remain
           REMAINING_PROJECTS=$(find . \
             -mindepth 1 \
             -maxdepth 1 \
@@ -155,9 +102,77 @@ jobs:
             -print)
 
           if [ -z "${REMAINING_PROJECTS}" ]; then
+            echo "remaining=false" >> "$GITHUB_OUTPUT"
+            echo "No DCM projects remain."
+          else
+            echo "remaining=true" >> "$GITHUB_OUTPUT"
+
+            echo "Other DCM projects still exist:"
+            echo "${REMAINING_PROJECTS}"
+          fi
+
+      # --------------------------------------------------
+      # STEP 5: DELETE SHARED DCM WORKFLOWS
+      # --------------------------------------------------
+
+      - name: Delete shared DCM Plan and Deploy workflows
+        if: steps.remaining-projects.outputs.remaining == 'false'
+        shell: bash
+        run: |
+          set -e
+
+          echo "No DCM projects remain."
+          echo "Deleting generated DCM workflows."
+
+          for workflow in \
+            ".github/workflows/dcm-plan.yml" \
+            ".github/workflows/dcm-deploy.yml"; do
+
+            if [ -e "${workflow}" ] || [ -L "${workflow}" ]; then
+              rm -f -- "${workflow}"
+              echo "SUCCESS: Deleted ${workflow}"
+            else
+              echo "INFO: ${workflow} does not exist."
+            fi
+
+          done
+
+      # --------------------------------------------------
+      # STEP 6: PRESERVE SHARED WORKFLOWS
+      # --------------------------------------------------
+
+      - name: Preserve shared DCM workflows
+        if: steps.remaining-projects.outputs.remaining == 'true'
+        shell: bash
+        run: |
+          set -e
+
+          echo "Other DCM projects remain."
+
+          echo "Preserving:"
+          echo ".github/workflows/dcm-plan.yml"
+          echo ".github/workflows/dcm-deploy.yml"
+
+      # --------------------------------------------------
+      # STEP 7: UPDATE OR DELETE REPOSITORY README
+      # --------------------------------------------------
+
+      - name: Update repository README
+        shell: bash
+        env:
+          SCHEMA_NAME: ${{ inputs.schema_name }}
+          PROJECTS_REMAIN: ${{ steps.remaining-projects.outputs.remaining }}
+        run: |
+          set -e
+
+          echo "=========================================="
+          echo "Processing repository README"
+          echo "=========================================="
+
+          if [ "${PROJECTS_REMAIN}" = "false" ]; then
 
             # No DCM projects remain.
-            # Delete the repository-level README generated by bootstrap.
+            # Delete repository-level README.
 
             if [ -e "README.md" ] || [ -L "README.md" ]; then
               rm -f -- "README.md"
@@ -168,23 +183,26 @@ jobs:
 
           else
 
-            # Other schema projects still exist.
-            # Preserve the shared README and remove only the
-            # deleted schema's entry from its project listing.
+            # Other DCM projects remain.
+            # Preserve repository README and remove
+            # only the deleted schema's project listing.
 
             if [ -f "README.md" ]; then
 
               TEMP_README=$(mktemp)
 
-              awk -v entry="${PROJECT_ENTRY}" \
-                '$0 != entry { print }' \
-                README.md > "${TEMP_README}"
+              awk -v schema="${SCHEMA_NAME}" '
+                index($0, "- **" schema "** - `") == 0 {
+                  print
+                }
+              ' README.md > "${TEMP_README}"
 
               cat "${TEMP_README}" > README.md
+
               rm -f "${TEMP_README}"
 
               echo "SUCCESS: Updated repository README."
-              echo "Other DCM project documentation preserved."
+              echo "Preserved documentation for remaining schemas."
 
             else
               echo "INFO: Repository README.md does not exist."
@@ -193,10 +211,34 @@ jobs:
           fi
 
       # --------------------------------------------------
-      # STEP 6: VERIFY ALL SELECTED PROJECT CONTENT
+      # STEP 8: PRESERVE MANAGEMENT WORKFLOWS
       # --------------------------------------------------
 
-      - name: Verify repository cleanup
+      - name: Preserve Bootstrap and Delete workflows
+        shell: bash
+        run: |
+          set -e
+
+          echo "Preserving repository management workflows."
+
+          for workflow in \
+            ".github/workflows/bootstrap-structure.yml" \
+            ".github/workflows/delete-structure.yml"; do
+
+            if [ ! -f "${workflow}" ]; then
+              echo "ERROR: Required workflow is missing: ${workflow}"
+              exit 1
+            fi
+
+            echo "SUCCESS: Preserved ${workflow}."
+
+          done
+
+      # --------------------------------------------------
+      # STEP 9: VERIFY PROJECT DELETION
+      # --------------------------------------------------
+
+      - name: Verify DCM project deletion
         shell: bash
         env:
           SCHEMA_NAME: ${{ inputs.schema_name }}
@@ -206,75 +248,95 @@ jobs:
           PROJECT_DIR="DCM_${SCHEMA_NAME}"
 
           echo "=========================================="
-          echo "Verifying repository cleanup"
+          echo "Verifying DCM project deletion"
           echo "=========================================="
 
-          # Verify complete DCM project deletion
           if [ -e "${PROJECT_DIR}" ] || [ -L "${PROJECT_DIR}" ]; then
             echo "ERROR: ${PROJECT_DIR} still exists."
             exit 1
           fi
 
-          echo "SUCCESS: DCM project directory deleted."
+          echo "SUCCESS: ${PROJECT_DIR} completely deleted."
 
-          # Verify generated DCM Plan workflow deletion
-          if [ -e ".github/workflows/dcm-plan.yml" ] || \
-             [ -L ".github/workflows/dcm-plan.yml" ]; then
+      # --------------------------------------------------
+      # STEP 10: VERIFY SHARED WORKFLOW CLEANUP
+      # --------------------------------------------------
 
-            echo "ERROR: dcm-plan.yml still exists."
-            exit 1
-          fi
+      - name: Verify shared workflow cleanup
+        shell: bash
+        env:
+          PROJECTS_REMAIN: ${{ steps.remaining-projects.outputs.remaining }}
+        run: |
+          set -e
 
-          echo "SUCCESS: dcm-plan.yml deleted."
+          echo "=========================================="
+          echo "Verifying shared workflows"
+          echo "=========================================="
 
-          # Verify generated DCM Deploy workflow deletion
-          if [ -e ".github/workflows/dcm-deploy.yml" ] || \
-             [ -L ".github/workflows/dcm-deploy.yml" ]; then
+          if [ "${PROJECTS_REMAIN}" = "false" ]; then
 
-            echo "ERROR: dcm-deploy.yml still exists."
-            exit 1
-          fi
+            for workflow in \
+              ".github/workflows/dcm-plan.yml" \
+              ".github/workflows/dcm-deploy.yml"; do
 
-          echo "SUCCESS: dcm-deploy.yml deleted."
+              if [ -e "${workflow}" ] || [ -L "${workflow}" ]; then
+                echo "ERROR: ${workflow} still exists."
+                exit 1
+              fi
 
-          # Verify project README deletion
-          if [ -e "${PROJECT_DIR}/README.md" ]; then
-            echo "ERROR: Project README still exists."
-            exit 1
-          fi
+              echo "SUCCESS: ${workflow} deleted."
 
-          # Verify root README handling
-          REMAINING_PROJECTS=$(find . \
-            -mindepth 1 \
-            -maxdepth 1 \
-            -type d \
-            -name 'DCM_*' \
-            -print)
+            done
 
-          if [ -z "${REMAINING_PROJECTS}" ]; then
+            # Verify repository README
             if [ -e "README.md" ] || [ -L "README.md" ]; then
               echo "ERROR: Repository README.md still exists."
               exit 1
             fi
 
             echo "SUCCESS: Repository README.md deleted."
+
           else
-            echo "SUCCESS: Shared repository README preserved."
-            echo "Remaining DCM projects:"
-            echo "${REMAINING_PROJECTS}"
+
+            echo "Other DCM projects remain."
+
+            # Shared workflows should not be removed
+            # when other DCM projects still exist.
+
+            for workflow in \
+              ".github/workflows/dcm-plan.yml" \
+              ".github/workflows/dcm-deploy.yml"; do
+
+              if [ ! -f "${workflow}" ]; then
+                echo "ERROR: Shared workflow missing: ${workflow}"
+                exit 1
+              fi
+
+              echo "SUCCESS: Preserved ${workflow}."
+
+            done
+
+            if [ ! -f "README.md" ]; then
+              echo "ERROR: Repository README.md is missing."
+              exit 1
+            fi
+
+            echo "SUCCESS: Repository README.md preserved."
+
           fi
 
-          # Verify management workflows are preserved
+          # Verify management workflows
           for workflow in \
             ".github/workflows/bootstrap-structure.yml" \
             ".github/workflows/delete-structure.yml"; do
 
             if [ ! -f "${workflow}" ]; then
-              echo "ERROR: Required management workflow missing: ${workflow}"
+              echo "ERROR: Management workflow missing: ${workflow}"
               exit 1
             fi
 
             echo "SUCCESS: Preserved ${workflow}."
+
           done
 
           echo "=========================================="
@@ -282,7 +344,7 @@ jobs:
           echo "=========================================="
 
       # --------------------------------------------------
-      # STEP 7: STAGE DELETIONS AND MODIFICATIONS
+      # STEP 11: STAGE ALL DELETIONS AND MODIFICATIONS
       # --------------------------------------------------
 
       - name: Stage repository changes
@@ -296,7 +358,7 @@ jobs:
           git status --short
 
       # --------------------------------------------------
-      # STEP 8: COMMIT AND PUSH CHANGES
+      # STEP 12: COMMIT AND PUSH DELETIONS
       # --------------------------------------------------
 
       - name: Commit and push deletion
@@ -312,7 +374,9 @@ jobs:
             "41898282+github-actions[bot]@users.noreply.github.com"
 
           if git diff --cached --quiet; then
-            echo "No files or directories required deletion."
+
+            echo "No repository changes to commit."
+
           else
 
             git commit -m \
