@@ -1,5 +1,68 @@
 
-      - name: Delete complete DCM repository structure
+name: Delete Snowflake DCM Project Structure
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: "Branch from which the DCM project structure should be deleted"
+        required: true
+        type: choice
+        options:
+          - dev
+          - qa
+          - uat
+          - prod
+
+      schema_name:
+        description: "Enter the Snowflake schema name to delete (e.g., TPCH_SF1, SALES, FINANCE)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  delete-structure:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # --------------------------------------------------
+      # 1. CHECKOUT TARGET BRANCH
+      # --------------------------------------------------
+
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_branch }}
+          token: ${{ secrets.BOOTSTRAP_TOKEN }}
+          fetch-depth: 0
+
+      # --------------------------------------------------
+      # 2. VALIDATE SCHEMA NAME
+      # --------------------------------------------------
+
+      - name: Validate schema name
+        shell: bash
+        env:
+          SCHEMA_NAME: ${{ inputs.schema_name }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${SCHEMA_NAME}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+            echo "ERROR: Invalid schema name: ${SCHEMA_NAME}"
+            echo "Use letters, numbers and underscores."
+            exit 1
+          fi
+
+          echo "Schema name validated: ${SCHEMA_NAME}"
+
+      # --------------------------------------------------
+      # 3. DELETE COMPLETE DCM PROJECT STRUCTURE
+      # --------------------------------------------------
+
+      - name: Delete DCM project and repository files
         shell: bash
         env:
           SCHEMA_NAME: ${{ inputs.schema_name }}
@@ -8,41 +71,74 @@
 
           PROJECT_DIR="DCM_${SCHEMA_NAME}"
 
-          echo "======================================"
-          echo "Deleting DCM repository structure"
+          echo "=========================================="
+          echo "Deleting Snowflake DCM project structure"
           echo "Project: ${PROJECT_DIR}"
-          echo "======================================"
+          echo "Schema: ${SCHEMA_NAME}"
+          echo "=========================================="
 
-          # Verify selected project exists
+          # ----------------------------------------------
+          # Validate project directory
+          # ----------------------------------------------
+
           if [ ! -d "${PROJECT_DIR}" ]; then
             echo "ERROR: Project directory does not exist: ${PROJECT_DIR}"
             exit 1
           fi
 
-          # 1. Delete complete schema-specific DCM project
+          # ----------------------------------------------
+          # 1. DELETE COMPLETE DCM PROJECT DIRECTORY
+          # ----------------------------------------------
+
           rm -rf -- "${PROJECT_DIR}"
 
-          echo "Deleted: ${PROJECT_DIR}"
+          echo "Deleted project directory: ${PROJECT_DIR}"
 
-          # 2. Delete shared DCM Plan workflow
+          # ----------------------------------------------
+          # 2. DELETE DCM PLAN WORKFLOW
+          # ----------------------------------------------
+
           if [ -f ".github/workflows/dcm-plan.yml" ]; then
-            rm -f ".github/workflows/dcm-plan.yml"
+            rm -f -- ".github/workflows/dcm-plan.yml"
             echo "Deleted: .github/workflows/dcm-plan.yml"
+          else
+            echo "DCM Plan workflow not found."
           fi
 
-          # 3. Delete shared DCM Deploy workflow
+          # ----------------------------------------------
+          # 3. DELETE DCM DEPLOY WORKFLOW
+          # ----------------------------------------------
+
           if [ -f ".github/workflows/dcm-deploy.yml" ]; then
-            rm -f ".github/workflows/dcm-deploy.yml"
+            rm -f -- ".github/workflows/dcm-deploy.yml"
             echo "Deleted: .github/workflows/dcm-deploy.yml"
+          else
+            echo "DCM Deploy workflow not found."
           fi
 
-          # 4. Delete repository-level README
+          # ----------------------------------------------
+          # 4. DELETE ROOT REPOSITORY README
+          # ----------------------------------------------
+
           if [ -f "README.md" ]; then
-            rm -f "README.md"
-            echo "Deleted: README.md"
+            rm -f -- "README.md"
+            echo "Deleted repository README.md"
+          else
+            echo "Repository README.md not found."
           fi
 
-          # 5. Remove empty workflow directories only
+          # ----------------------------------------------
+          # 5. PRESERVE BOOTSTRAP AND DELETE WORKFLOWS
+          # ----------------------------------------------
+
+          echo "Preserving shared management workflows:"
+          echo "- .github/workflows/bootstrap-structure.yml"
+          echo "- .github/workflows/delete-structure.yml"
+
+          # ----------------------------------------------
+          # 6. REMOVE EMPTY DIRECTORIES ONLY
+          # ----------------------------------------------
+
           if [ -d ".github/workflows" ]; then
             rmdir ".github/workflows" 2>/dev/null || true
           fi
@@ -51,6 +147,110 @@
             rmdir ".github" 2>/dev/null || true
           fi
 
-          echo "======================================"
-          echo "DCM repository structure deletion completed."
-          echo "======================================"
+          echo "=========================================="
+          echo "DCM project structure deletion completed."
+          echo "=========================================="
+
+      # --------------------------------------------------
+      # 4. VERIFY DELETION
+      # --------------------------------------------------
+
+      - name: Verify deleted files
+        shell: bash
+        env:
+          SCHEMA_NAME: ${{ inputs.schema_name }}
+        run: |
+          set -euo pipefail
+
+          PROJECT_DIR="DCM_${SCHEMA_NAME}"
+
+          echo "Verifying deletion..."
+
+          FAILED=0
+
+          if [ -e "${PROJECT_DIR}" ]; then
+            echo "ERROR: Project directory still exists."
+            FAILED=1
+          fi
+
+          if [ -e ".github/workflows/dcm-plan.yml" ]; then
+            echo "ERROR: DCM Plan workflow still exists."
+            FAILED=1
+          fi
+
+          if [ -e ".github/workflows/dcm-deploy.yml" ]; then
+            echo "ERROR: DCM Deploy workflow still exists."
+            FAILED=1
+          fi
+
+          if [ -e "README.md" ]; then
+            echo "ERROR: Repository README still exists."
+            FAILED=1
+          fi
+
+          if [ ! -f ".github/workflows/bootstrap-structure.yml" ]; then
+            echo "ERROR: Bootstrap workflow is missing."
+            FAILED=1
+          fi
+
+          if [ ! -f ".github/workflows/delete-structure.yml" ]; then
+            echo "ERROR: Delete workflow is missing."
+            FAILED=1
+          fi
+
+          if [ "${FAILED}" -ne 0 ]; then
+            echo "Deletion verification failed."
+            exit 1
+          fi
+
+          echo "All requested deletions verified."
+          echo "Bootstrap and Delete workflows preserved."
+
+      # --------------------------------------------------
+      # 5. COMMIT AND PUSH DELETION
+      # --------------------------------------------------
+
+      - name: Commit and push deletion
+        shell: bash
+        env:
+          TARGET_BRANCH: ${{ inputs.target_branch }}
+          SCHEMA_NAME: ${{ inputs.schema_name }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Stage all deletions and changes
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "No changes detected."
+          else
+
+            git commit -m \
+              "Delete DCM project and repository structure for ${SCHEMA_NAME}"
+
+            git push origin "HEAD:${TARGET_BRANCH}"
+
+            echo "=========================================="
+            echo "DCM STRUCTURE DELETION SUCCESSFUL"
+            echo "=========================================="
+            echo "Schema: ${SCHEMA_NAME}"
+            echo "Project: DCM_${SCHEMA_NAME}"
+            echo "Branch: ${TARGET_BRANCH}"
+            echo ""
+            echo "Deleted:"
+            echo "- DCM project directory"
+            echo "- dcm-plan.yml"
+            echo "- dcm-deploy.yml"
+            echo "- Root README.md"
+            echo ""
+            echo "Preserved:"
+            echo "- bootstrap-structure.yml"
+            echo "- delete-structure.yml"
+            echo ""
+            echo "Changes committed and pushed successfully."
+
+          fi
