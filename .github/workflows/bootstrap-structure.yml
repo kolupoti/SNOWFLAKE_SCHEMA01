@@ -15,9 +15,8 @@ on:
           - prod
 
       schema_name:
-        description: "Snowflake schema name"
+        description: "Enter the Snowflake schema name (e.g., TPCH_SF1, SALES, FINANCE)"
         required: true
-        default: "TPCH_SF1"
         type: string
 
 permissions:
@@ -35,6 +34,21 @@ jobs:
           token: ${{ secrets.BOOTSTRAP_TOKEN }}
           fetch-depth: 0
 
+      - name: Validate schema name
+        shell: bash
+        env:
+          SCHEMA_NAME: ${{ inputs.schema_name }}
+        run: |
+          set -e
+
+          if [[ ! "${SCHEMA_NAME}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+            echo "Invalid schema name: ${SCHEMA_NAME}"
+            echo "Use letters, numbers, and underscores. The first character must be a letter or underscore."
+            exit 1
+          fi
+
+          echo "Validated schema name: ${SCHEMA_NAME}"
+
       - name: Create DCM project structure
         shell: bash
         env:
@@ -42,7 +56,8 @@ jobs:
         run: |
           set -e
 
-          PROJECT_DIR="DCM_TPCH_SF1"
+          PROJECT_DIR="DCM_${SCHEMA_NAME}"
+          PROJECT_PREFIX="DCM_${SCHEMA_NAME}"
 
           echo "Creating Snowflake DCM project: ${PROJECT_DIR}"
           echo "Snowflake schema: ${SCHEMA_NAME}"
@@ -68,26 +83,26 @@ jobs:
 
             DEV:
               account_identifier: YOUR_SNOWFLAKE_ACCOUNT
-              project_name: YOUR_DATABASE.YOUR_SCHEMA.DCM_TPCH_SF1_DEV
-              project_owner: DCM_TPCH_SF1_DEPLOYER
+              project_name: YOUR_DATABASE.YOUR_SCHEMA.${PROJECT_PREFIX}_DEV
+              project_owner: ${PROJECT_PREFIX}_DEPLOYER
               templating_config: DEV
 
             QA:
               account_identifier: YOUR_SNOWFLAKE_ACCOUNT
-              project_name: YOUR_DATABASE.YOUR_SCHEMA.DCM_TPCH_SF1_QA
-              project_owner: DCM_TPCH_SF1_DEPLOYER
+              project_name: YOUR_DATABASE.YOUR_SCHEMA.${PROJECT_PREFIX}_QA
+              project_owner: ${PROJECT_PREFIX}_DEPLOYER
               templating_config: QA
 
             UAT:
               account_identifier: YOUR_SNOWFLAKE_ACCOUNT
-              project_name: YOUR_DATABASE.YOUR_SCHEMA.DCM_TPCH_SF1_UAT
-              project_owner: DCM_TPCH_SF1_DEPLOYER
+              project_name: YOUR_DATABASE.YOUR_SCHEMA.${PROJECT_PREFIX}_UAT
+              project_owner: ${PROJECT_PREFIX}_DEPLOYER
               templating_config: UAT
 
             PROD:
               account_identifier: YOUR_SNOWFLAKE_ACCOUNT
-              project_name: YOUR_DATABASE.YOUR_SCHEMA.DCM_TPCH_SF1_PROD
-              project_owner: DCM_TPCH_SF1_DEPLOYER
+              project_name: YOUR_DATABASE.YOUR_SCHEMA.${PROJECT_PREFIX}_PROD
+              project_owner: ${PROJECT_PREFIX}_DEPLOYER
               templating_config: PROD
           EOF
           fi
@@ -137,10 +152,12 @@ jobs:
 
           # Create DCM project README
           if [ ! -f "${PROJECT_DIR}/README.md" ]; then
-            cat > "${PROJECT_DIR}/README.md" <<'EOF'
-          # DCM_TPCH_SF1
+            cat > "${PROJECT_DIR}/README.md" <<EOF
+          # ${PROJECT_PREFIX}
 
           Snowflake Data Cloud Management (DCM) project.
+
+          Snowflake schema: ${SCHEMA_NAME}
 
           ## Project Structure
 
@@ -160,7 +177,7 @@ jobs:
           DCM project deployments are managed through
           Snowflake DCM and GitHub Actions.
 
-          Review the manifest.yml and environment configurations
+          Review manifest.yml and environment configurations
           before executing deployments.
           EOF
           fi
@@ -207,14 +224,12 @@ jobs:
 
           # Create repository-level README
           if [ ! -f "README.md" ]; then
-            cat > "README.md" <<'EOF'
-          # SNOWFLAKE_TPCH_SF1
-
-          Snowflake DCM Git repository.
+            cat > "README.md" <<EOF
+          # Snowflake DCM Git Repository
 
           ## DCM Projects
 
-          - DCM_TPCH_SF1
+          - ${PROJECT_PREFIX}
 
           ## GitHub Actions
 
@@ -228,6 +243,7 @@ jobs:
         shell: bash
         env:
           TARGET_BRANCH: ${{ inputs.target_branch }}
+          SCHEMA_NAME: ${{ inputs.schema_name }}
         run: |
           set -e
 
@@ -240,6 +256,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "No changes required. Repository structure already exists."
           else
-            git commit -m "Initialize Snowflake DCM project structure"
+            git commit -m "Initialize Snowflake DCM project structure for ${SCHEMA_NAME}"
             git push origin "HEAD:${TARGET_BRANCH}"
+            echo "Successfully created DCM project structure."
           fi
