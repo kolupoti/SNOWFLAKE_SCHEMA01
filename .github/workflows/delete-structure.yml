@@ -15,7 +15,12 @@ on:
           - prod
 
       schema_name:
-        description: "Enter the Snowflake schema name to delete (e.g., TPCH_SF1, SALES, FINANCE)"
+        description: "Enter the Snowflake schema name (e.g., TPCH_SF1, SALES, FINANCE)"
+        required: true
+        type: string
+
+      confirm_delete:
+        description: "Type DELETE to confirm permanent removal from Git"
         required: true
         type: string
 
@@ -27,200 +32,229 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
       # --------------------------------------------------
       # 1. CHECKOUT TARGET BRANCH
       # --------------------------------------------------
 
       - name: Checkout target branch
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@v4
         with:
           ref: ${{ inputs.target_branch }}
           token: ${{ secrets.BOOTSTRAP_TOKEN }}
           fetch-depth: 0
 
       # --------------------------------------------------
-      # 2. VALIDATE SCHEMA NAME
+      # 2. VALIDATE INPUTS
       # --------------------------------------------------
 
-      - name: Validate schema name
+      - name: Validate deletion inputs
         shell: bash
         env:
           SCHEMA_NAME: ${{ inputs.schema_name }}
+          CONFIRM_DELETE: ${{ inputs.confirm_delete }}
         run: |
-          set -euo pipefail
+          set -e
 
           if [[ ! "${SCHEMA_NAME}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
-            echo "ERROR: Invalid schema name: ${SCHEMA_NAME}"
+            echo "::error::Invalid schema name: ${SCHEMA_NAME}"
             echo "Use letters, numbers and underscores."
             exit 1
           fi
 
+          if [[ "${CONFIRM_DELETE}" != "DELETE" ]]; then
+            echo "::error::Deletion confirmation failed."
+            echo "You must enter DELETE to continue."
+            exit 1
+          fi
+
           echo "Schema name validated: ${SCHEMA_NAME}"
+          echo "Deletion confirmation successful."
 
       # --------------------------------------------------
-      # 3. DELETE COMPLETE DCM PROJECT STRUCTURE
+      # 3. DELETE DCM PROJECT STRUCTURE
       # --------------------------------------------------
 
-      - name: Delete DCM project and shared repository files
+      - name: Delete DCM project structure and generated files
         shell: bash
         env:
           SCHEMA_NAME: ${{ inputs.schema_name }}
         run: |
-          set -euo pipefail
+          set -e
 
           PROJECT_DIR="DCM_${SCHEMA_NAME}"
 
-          echo "=========================================="
-          echo "Deleting Snowflake DCM repository structure"
-          echo "Project: ${PROJECT_DIR}"
-          echo "Schema: ${SCHEMA_NAME}"
-          echo "=========================================="
+          echo "Preparing to delete DCM project: ${PROJECT_DIR}"
 
-          # ----------------------------------------------
-          # Verify selected DCM project exists
-          # ----------------------------------------------
+          # --------------------------------------------------
+          # Validate project directory
+          # --------------------------------------------------
 
-          if [ ! -d "${PROJECT_DIR}" ]; then
-            echo "ERROR: Project directory does not exist: ${PROJECT_DIR}"
+          if [[ ! -d "${PROJECT_DIR}" ]]; then
+            echo "::error::DCM project directory does not exist: ${PROJECT_DIR}"
             exit 1
           fi
 
-          # ----------------------------------------------
-          # 1. DELETE COMPLETE DCM PROJECT DIRECTORY
-          # ----------------------------------------------
+          # --------------------------------------------------
+          # 1. DELETE SCHEMA-SPECIFIC DCM PROJECT
+          # --------------------------------------------------
+
+          echo "Deleting ${PROJECT_DIR}"
 
           rm -rf -- "${PROJECT_DIR}"
 
-          echo "Deleted: ${PROJECT_DIR}/"
+          # --------------------------------------------------
+          # 2. DELETE GENERATED DCM PLAN WORKFLOW
+          # --------------------------------------------------
 
-          # ----------------------------------------------
-          # 2. DELETE DCM PLAN WORKFLOW
-          # ----------------------------------------------
-
-          if [ -f ".github/workflows/dcm-plan.yml" ]; then
-            rm -f -- ".github/workflows/dcm-plan.yml"
-            echo "Deleted: .github/workflows/dcm-plan.yml"
-          else
-            echo "DCM Plan workflow not found."
+          if [[ -f ".github/workflows/dcm-plan.yml" ]]; then
+            echo "Deleting dcm-plan.yml"
+            rm -f ".github/workflows/dcm-plan.yml"
           fi
 
-          # ----------------------------------------------
-          # 3. DELETE DCM DEPLOY WORKFLOW
-          # ----------------------------------------------
+          # --------------------------------------------------
+          # 3. DELETE GENERATED DCM DEPLOY WORKFLOW
+          # --------------------------------------------------
 
-          if [ -f ".github/workflows/dcm-deploy.yml" ]; then
-            rm -f -- ".github/workflows/dcm-deploy.yml"
-            echo "Deleted: .github/workflows/dcm-deploy.yml"
-          else
-            echo "DCM Deploy workflow not found."
+          if [[ -f ".github/workflows/dcm-deploy.yml" ]]; then
+            echo "Deleting dcm-deploy.yml"
+            rm -f ".github/workflows/dcm-deploy.yml"
           fi
 
-          # ----------------------------------------------
-          # 4. DELETE ROOT REPOSITORY README
-          # ----------------------------------------------
+          # --------------------------------------------------
+          # 4. REGENERATE REPOSITORY PROJECT LIST
+          # --------------------------------------------------
 
-          if [ -f "README.md" ]; then
-            rm -f -- "README.md"
-            echo "Deleted: README.md"
-          else
-            echo "Repository README not found."
+          PROJECT_LIST=""
+
+          for dir in DCM_*; do
+            if [[ -d "${dir}" ]]; then
+              PROJECT_SCHEMA="${dir#DCM_}"
+
+              PROJECT_LIST="${PROJECT_LIST}- **${PROJECT_SCHEMA}** - \`${dir}\`"$'\n'
+            fi
+          done
+
+          # --------------------------------------------------
+          # 5. UPDATE REPOSITORY README
+          # --------------------------------------------------
+
+          if [[ -f "README.md" ]]; then
+
+            cat > README.md <<EOF
+          # Snowflake DCM Git Repository
+
+          ## 1. Overview
+
+          This repository provides a centralized Git-based framework
+          for managing Snowflake Data Cloud Management (DCM) Projects.
+
+          Each Snowflake schema is maintained as an independent
+          DCM project directory.
+
+          ## 2. Supported Environments
+
+          | Environment | Git Branch |
+          |---|---|
+          | DEV | dev |
+          | QA | qa |
+          | UAT | uat |
+          | PROD | prod |
+
+          ## 3. Current DCM Projects
+
+          The following DCM projects are currently present
+          in this repository:
+
+          ${PROJECT_LIST}
+
+          ## 4. Project Management
+
+          ### Bootstrap DCM Project
+
+          Use the GitHub Actions workflow:
+
+          \`bootstrap-structure.yml\`
+
+          Provide the target branch and Snowflake schema name
+          to create a new DCM project structure.
+
+          ### Delete DCM Project
+
+          Use the GitHub Actions workflow:
+
+          \`delete-structure.yml\`
+
+          Provide the target branch and Snowflake schema name.
+          Enter DELETE to confirm the removal.
+
+          ## 5. Environment Promotion
+
+          Recommended promotion sequence:
+
+          DEV -> QA -> UAT -> PROD
+
+          Use Pull Requests and appropriate approvals
+          to control environment promotions.
+
+          ## 6. Important Considerations
+
+          - Each schema has an independent DCM project.
+          - Project deletion removes Git repository files.
+          - Deletion does not drop Snowflake DCM projects.
+          - Deletion does not drop Snowflake database objects.
+          - Snowflake resources must be managed separately.
+          - Existing projects are preserved during other
+            schema-specific deletion operations.
+
+          ## 7. Security Guidelines
+
+          - Use GitHub Secrets for authentication.
+          - Never commit Snowflake credentials.
+          - Restrict production branch write access.
+          - Require approvals for sensitive changes.
+
+          ---
+
+          **Framework:** Snowflake DCM with GitHub
+
+          **Supported Environments:** DEV, QA, UAT, PROD
+
+          **Project Strategy:** One independent DCM project per schema
+          EOF
+
           fi
 
-          # ----------------------------------------------
-          # 5. REMOVE EMPTY GITHUB DIRECTORIES
-          # ----------------------------------------------
-
-          # Preserve bootstrap-structure.yml
-          # Preserve delete-structure.yml
-
-          if [ -d ".github/workflows" ]; then
-            rmdir ".github/workflows" 2>/dev/null || true
-          fi
-
-          if [ -d ".github" ]; then
-            rmdir ".github" 2>/dev/null || true
-          fi
-
-          echo "=========================================="
-          echo "DCM structure deletion completed."
-          echo "=========================================="
+          echo "DCM project deletion and repository documentation update completed."
 
       # --------------------------------------------------
       # 4. VERIFY DELETION
       # --------------------------------------------------
 
-      - name: Verify DCM structure deletion
+      - name: Verify deleted files
         shell: bash
         env:
           SCHEMA_NAME: ${{ inputs.schema_name }}
         run: |
-          set -euo pipefail
+          set -e
 
           PROJECT_DIR="DCM_${SCHEMA_NAME}"
 
-          echo "=========================================="
-          echo "Verifying deleted files..."
-          echo "=========================================="
-
-          FAILED=0
-
-          # Verify DCM project directory
-          if [ -e "${PROJECT_DIR}" ]; then
-            echo "ERROR: ${PROJECT_DIR} still exists."
-            FAILED=1
-          else
-            echo "PASS: DCM project directory deleted."
-          fi
-
-          # Verify DCM Plan workflow
-          if [ -e ".github/workflows/dcm-plan.yml" ]; then
-            echo "ERROR: dcm-plan.yml still exists."
-            FAILED=1
-          else
-            echo "PASS: dcm-plan.yml deleted."
-          fi
-
-          # Verify DCM Deploy workflow
-          if [ -e ".github/workflows/dcm-deploy.yml" ]; then
-            echo "ERROR: dcm-deploy.yml still exists."
-            FAILED=1
-          else
-            echo "PASS: dcm-deploy.yml deleted."
-          fi
-
-          # Verify root README
-          if [ -e "README.md" ]; then
-            echo "ERROR: README.md still exists."
-            FAILED=1
-          else
-            echo "PASS: Root README.md deleted."
-          fi
-
-          # Verify Bootstrap workflow preserved
-          if [ ! -f ".github/workflows/bootstrap-structure.yml" ]; then
-            echo "ERROR: bootstrap-structure.yml is missing."
-            FAILED=1
-          else
-            echo "PASS: bootstrap-structure.yml preserved."
-          fi
-
-          # Verify Delete workflow preserved
-          if [ ! -f ".github/workflows/delete-structure.yml" ]; then
-            echo "ERROR: delete-structure.yml is missing."
-            FAILED=1
-          else
-            echo "PASS: delete-structure.yml preserved."
-          fi
-
-          if [ "${FAILED}" -ne 0 ]; then
-            echo "ERROR: Deletion verification failed."
+          if [[ -e "${PROJECT_DIR}" ]]; then
+            echo "::error::DCM project directory still exists."
             exit 1
           fi
 
-          echo "=========================================="
-          echo "All deletion checks passed."
-          echo "=========================================="
+          if [[ -f ".github/workflows/dcm-plan.yml" ]]; then
+            echo "::error::dcm-plan.yml still exists."
+            exit 1
+          fi
+
+          if [[ -f ".github/workflows/dcm-deploy.yml" ]]; then
+            echo "::error::dcm-deploy.yml still exists."
+            exit 1
+          fi
+
+          echo "Deletion verification completed successfully."
 
       # --------------------------------------------------
       # 5. COMMIT AND PUSH DELETION
@@ -232,41 +266,20 @@ jobs:
           TARGET_BRANCH: ${{ inputs.target_branch }}
           SCHEMA_NAME: ${{ inputs.schema_name }}
         run: |
-          set -euo pipefail
+          set -e
 
           git config user.name "github-actions[bot]"
           git config user.email \
             "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # Stage all repository deletions and changes
           git add -A
 
           if git diff --cached --quiet; then
-            echo "No changes detected."
+            echo "No changes required."
           else
-
-            git commit -m \
-              "Delete DCM project and repository structure for ${SCHEMA_NAME}"
+            git commit -m "Delete DCM project structure for ${SCHEMA_NAME}"
 
             git push origin "HEAD:${TARGET_BRANCH}"
 
-            echo "=========================================="
-            echo "DCM REPOSITORY CLEANUP SUCCESSFUL"
-            echo "=========================================="
-
-            echo "Deleted:"
-            echo "- DCM_${SCHEMA_NAME}/"
-            echo "- .github/workflows/dcm-plan.yml"
-            echo "- .github/workflows/dcm-deploy.yml"
-            echo "- README.md"
-
-            echo ""
-            echo "Preserved:"
-            echo "- .github/workflows/bootstrap-structure.yml"
-            echo "- .github/workflows/delete-structure.yml"
-
-            echo ""
-            echo "Branch: ${TARGET_BRANCH}"
-            echo "Commit and push completed successfully."
-
+            echo "Successfully deleted DCM project structure."
           fi
