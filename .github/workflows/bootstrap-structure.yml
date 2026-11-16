@@ -15,18 +15,43 @@ on:
           - prod
 
       schema_name:
-        description: "Enter the Snowflake schema name (e.g., TPCH_SF1, SALES, FINANCE)"
+        description: "Snowflake business schema name (e.g., TPCH_SF1, SALES, FINANCE)"
         required: true
+        type: string
+
+      account_identifier:
+        description: "Snowflake account identifier"
+        required: true
+        default: "YOUR_ORG-YOUR_ACCOUNT"
+        type: string
+
+      dcm_database:
+        description: "Database containing Snowflake DCM projects"
+        required: true
+        default: "DCM_ADMIN_DB"
+        type: string
+
+      dcm_schema:
+        description: "Schema containing Snowflake DCM projects"
+        required: true
+        default: "PROJECTS"
         type: string
 
 permissions:
   contents: write
 
 jobs:
+
   create-structure:
+
     runs-on: ubuntu-latest
 
     steps:
+
+      # --------------------------------------------------
+      # 1. CHECKOUT SELECTED BRANCH
+      # --------------------------------------------------
+
       - name: Checkout target branch
         uses: actions/checkout@v4
         with:
@@ -34,48 +59,102 @@ jobs:
           token: ${{ secrets.BOOTSTRAP_TOKEN }}
           fetch-depth: 0
 
-      - name: Validate schema name
+      # --------------------------------------------------
+      # 2. VALIDATE INPUTS
+      # --------------------------------------------------
+
+      - name: Validate inputs
         shell: bash
         env:
           SCHEMA_NAME: ${{ inputs.schema_name }}
+          ACCOUNT_IDENTIFIER: ${{ inputs.account_identifier }}
+          DCM_DATABASE: ${{ inputs.dcm_database }}
+          DCM_SCHEMA: ${{ inputs.dcm_schema }}
         run: |
-          set -e
+          set -euo pipefail
 
           if [[ ! "${SCHEMA_NAME}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
             echo "Invalid schema name: ${SCHEMA_NAME}"
-            echo "Use letters, numbers and underscores."
             exit 1
           fi
 
-          echo "Schema name validated: ${SCHEMA_NAME}"
+          if [[ ! "${DCM_DATABASE}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+            echo "Invalid DCM database name."
+            exit 1
+          fi
 
-      - name: Create DCM project structure and documentation
+          if [[ ! "${DCM_SCHEMA}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+            echo "Invalid DCM schema name."
+            exit 1
+          fi
+
+          if [[ ! "${ACCOUNT_IDENTIFIER}" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+            echo "Invalid Snowflake account identifier."
+            exit 1
+          fi
+
+          echo "All inputs validated successfully."
+
+      # --------------------------------------------------
+      # 3. CREATE DCM PROJECT STRUCTURE
+      # --------------------------------------------------
+
+      - name: Create DCM project structure
         shell: bash
         env:
           SCHEMA_NAME: ${{ inputs.schema_name }}
+          ACCOUNT_IDENTIFIER: ${{ inputs.account_identifier }}
+          DCM_DATABASE: ${{ inputs.dcm_database }}
+          DCM_SCHEMA: ${{ inputs.dcm_schema }}
         run: |
-          set -e
 
-          PROJECT_DIR="DCM_${SCHEMA_NAME}"
+          set -euo pipefail
+
           PROJECT_PREFIX="DCM_${SCHEMA_NAME}"
+          PROJECT_DIR="${PROJECT_PREFIX}"
 
-          echo "Creating DCM project: ${PROJECT_DIR}"
+          PROJECT_OWNER="${PROJECT_PREFIX}_DEPLOYER"
 
-          # Create project directories
-          mkdir -p "${PROJECT_DIR}/sources/definitions"
-          mkdir -p "${PROJECT_DIR}/sources/macros"
-          mkdir -p ".github/workflows"
+          LOWER_SCHEMA=$(echo "${SCHEMA_NAME}" | tr '[:upper:]' '[:lower:]')
+
+          echo "----------------------------------------"
+          echo "Creating DCM Project"
+          echo "Project       : ${PROJECT_PREFIX}"
+          echo "Schema        : ${SCHEMA_NAME}"
+          echo "Account       : ${ACCOUNT_IDENTIFIER}"
+          echo "DCM Database  : ${DCM_DATABASE}"
+          echo "DCM Schema    : ${DCM_SCHEMA}"
+          echo "Project Owner : ${PROJECT_OWNER}"
+          echo "----------------------------------------"
 
           # --------------------------------------------------
-          # 1. CREATE MANIFEST.YML
+          # 3.1 CREATE OBJECT TYPE DIRECTORIES
+          # --------------------------------------------------
+
+          mkdir -p "${PROJECT_DIR}/sources/definitions/database"
+          mkdir -p "${PROJECT_DIR}/sources/definitions/schemas"
+          mkdir -p "${PROJECT_DIR}/sources/definitions/tables"
+          mkdir -p "${PROJECT_DIR}/sources/definitions/views"
+          mkdir -p "${PROJECT_DIR}/sources/definitions/procedures"
+          mkdir -p "${PROJECT_DIR}/sources/definitions/functions"
+          mkdir -p "${PROJECT_DIR}/sources/definitions/streams"
+          mkdir -p "${PROJECT_DIR}/sources/definitions/tasks"
+          mkdir -p "${PROJECT_DIR}/sources/definitions/grants"
+          mkdir -p "${PROJECT_DIR}/sources/macros"
+
+          # --------------------------------------------------
+          # 3.2 GENERATE MANIFEST.YML
           # --------------------------------------------------
 
           if [ ! -f "${PROJECT_DIR}/manifest.yml" ]; then
+
             cat > "${PROJECT_DIR}/manifest.yml" <<EOF
-          # Snowflake DCM Project: ${PROJECT_PREFIX}
-          # Snowflake Schema: ${SCHEMA_NAME}
+          # Snowflake DCM Project
+          # Project: ${PROJECT_PREFIX}
+          # Business Schema: ${SCHEMA_NAME}
 
           manifest_version: 2
+
           type: DCM_PROJECT
 
           default_target: DEV
@@ -83,84 +162,209 @@ jobs:
           targets:
 
             DEV:
-              account_identifier: YOUR_SNOWFLAKE_ACCOUNT
-              project_name: YOUR_DATABASE.YOUR_SCHEMA.${PROJECT_PREFIX}_DEV
-              project_owner: ${PROJECT_PREFIX}_DEPLOYER
+              account_identifier: ${ACCOUNT_IDENTIFIER}
+              project_name: ${DCM_DATABASE}.${DCM_SCHEMA}.${PROJECT_PREFIX}_DEV
+              project_owner: ${PROJECT_OWNER}
               templating_config: DEV
 
             QA:
-              account_identifier: YOUR_SNOWFLAKE_ACCOUNT
-              project_name: YOUR_DATABASE.YOUR_SCHEMA.${PROJECT_PREFIX}_QA
-              project_owner: ${PROJECT_PREFIX}_DEPLOYER
+              account_identifier: ${ACCOUNT_IDENTIFIER}
+              project_name: ${DCM_DATABASE}.${DCM_SCHEMA}.${PROJECT_PREFIX}_QA
+              project_owner: ${PROJECT_OWNER}
               templating_config: QA
 
             UAT:
-              account_identifier: YOUR_SNOWFLAKE_ACCOUNT
-              project_name: YOUR_DATABASE.YOUR_SCHEMA.${PROJECT_PREFIX}_UAT
-              project_owner: ${PROJECT_PREFIX}_DEPLOYER
+              account_identifier: ${ACCOUNT_IDENTIFIER}
+              project_name: ${DCM_DATABASE}.${DCM_SCHEMA}.${PROJECT_PREFIX}_UAT
+              project_owner: ${PROJECT_OWNER}
               templating_config: UAT
 
             PROD:
-              account_identifier: YOUR_SNOWFLAKE_ACCOUNT
-              project_name: YOUR_DATABASE.YOUR_SCHEMA.${PROJECT_PREFIX}_PROD
-              project_owner: ${PROJECT_PREFIX}_DEPLOYER
+              account_identifier: ${ACCOUNT_IDENTIFIER}
+              project_name: ${DCM_DATABASE}.${DCM_SCHEMA}.${PROJECT_PREFIX}_PROD
+              project_owner: ${PROJECT_OWNER}
               templating_config: PROD
+
+          templating:
+
+            configurations:
+
+              DEV:
+                environment: DEV
+                business_schema: ${SCHEMA_NAME}
+
+              QA:
+                environment: QA
+                business_schema: ${SCHEMA_NAME}
+
+              UAT:
+                environment: UAT
+                business_schema: ${SCHEMA_NAME}
+
+              PROD:
+                environment: PROD
+                business_schema: ${SCHEMA_NAME}
           EOF
+
+            echo "Generated manifest.yml"
+
+          else
+
+            echo "Existing manifest.yml preserved."
+
           fi
 
           # --------------------------------------------------
-          # 2. CREATE SQL DEFINITION FILES
+          # 3.3 FUNCTION TO CREATE INDIVIDUAL SQL FILES
           # --------------------------------------------------
 
-          declare -A SQL_FILES=(
-            ["database.sql"]="Database definitions"
-            ["schema.sql"]="Schema definitions"
-            ["tables.sql"]="Table definitions"
-            ["views.sql"]="View definitions"
-            ["procedures.sql"]="Stored procedure definitions"
-            ["functions.sql"]="Function definitions"
-            ["streams.sql"]="Stream definitions"
-            ["tasks.sql"]="Task definitions"
-            ["grants.sql"]="Grant definitions"
-            ["streamlit.sql"]="Streamlit definitions"
-          )
+          create_sql_file() {
 
-          for file in "${!SQL_FILES[@]}"; do
-
-            FILE_PATH="${PROJECT_DIR}/sources/definitions/${file}"
+            FILE_PATH="$1"
+            DESCRIPTION="$2"
+            OBJECT_NAME="$3"
 
             if [ ! -f "${FILE_PATH}" ]; then
-              cat > "${FILE_PATH}" <<EOF
-          -- ${SQL_FILES[$file]}
-          -- DCM Project: ${PROJECT_PREFIX}
-          -- Snowflake Schema: ${SCHEMA_NAME}
-          --
-          -- Add valid Snowflake DCM SQL definitions here.
-          EOF
-            fi
 
-          done
+              cat > "${FILE_PATH}" <<EOF
+          -- ==================================================
+          -- ${DESCRIPTION}
+          -- ==================================================
+          --
+          -- DCM Project : ${PROJECT_PREFIX}
+          -- Business Schema : ${SCHEMA_NAME}
+          -- Object Name : ${OBJECT_NAME}
+          --
+          -- Add the corresponding Snowflake DCM definition.
+          --
+          -- IMPORTANT:
+          -- DCM definition files must use supported DEFINE,
+          -- GRANT or ATTACH statements.
+          --
+          -- Replace this template with a valid DCM definition.
+          --
+          -- ==================================================
+          EOF
+
+              echo "Created: ${FILE_PATH}"
+
+            else
+
+              echo "Preserved existing file: ${FILE_PATH}"
+
+            fi
+          }
 
           # --------------------------------------------------
-          # 3. CREATE COMMON SQL MACRO
+          # 3.4 DATABASE DEFINITION
+          # --------------------------------------------------
+
+          create_sql_file \
+            "${PROJECT_DIR}/sources/definitions/database/${LOWER_SCHEMA}_database.sql" \
+            "DATABASE DEFINITION" \
+            "${SCHEMA_NAME}_DATABASE"
+
+          # --------------------------------------------------
+          # 3.5 SCHEMA DEFINITION
+          # --------------------------------------------------
+
+          create_sql_file \
+            "${PROJECT_DIR}/sources/definitions/schemas/${LOWER_SCHEMA}_schema.sql" \
+            "SCHEMA DEFINITION" \
+            "${SCHEMA_NAME}"
+
+          # --------------------------------------------------
+          # 3.6 INDIVIDUAL TABLE DEFINITIONS
+          # --------------------------------------------------
+
+          create_sql_file \
+            "${PROJECT_DIR}/sources/definitions/tables/sample_table_01.sql" \
+            "TABLE DEFINITION" \
+            "SAMPLE_TABLE_01"
+
+          # --------------------------------------------------
+          # 3.7 INDIVIDUAL VIEW DEFINITIONS
+          # --------------------------------------------------
+
+          create_sql_file \
+            "${PROJECT_DIR}/sources/definitions/views/sample_view_01.sql" \
+            "VIEW DEFINITION" \
+            "SAMPLE_VIEW_01"
+
+          # --------------------------------------------------
+          # 3.8 INDIVIDUAL STORED PROCEDURE DEFINITIONS
+          # --------------------------------------------------
+
+          create_sql_file \
+            "${PROJECT_DIR}/sources/definitions/procedures/sample_procedure_01.sql" \
+            "STORED PROCEDURE DEFINITION" \
+            "SAMPLE_PROCEDURE_01"
+
+          # --------------------------------------------------
+          # 3.9 INDIVIDUAL FUNCTION DEFINITIONS
+          # --------------------------------------------------
+
+          create_sql_file \
+            "${PROJECT_DIR}/sources/definitions/functions/sample_function_01.sql" \
+            "FUNCTION DEFINITION" \
+            "SAMPLE_FUNCTION_01"
+
+          # --------------------------------------------------
+          # 3.10 INDIVIDUAL STREAM DEFINITIONS
+          # --------------------------------------------------
+
+          create_sql_file \
+            "${PROJECT_DIR}/sources/definitions/streams/sample_stream_01.sql" \
+            "STREAM DEFINITION" \
+            "SAMPLE_STREAM_01"
+
+          # --------------------------------------------------
+          # 3.11 INDIVIDUAL TASK DEFINITIONS
+          # --------------------------------------------------
+
+          create_sql_file \
+            "${PROJECT_DIR}/sources/definitions/tasks/sample_task_01.sql" \
+            "TASK DEFINITION" \
+            "SAMPLE_TASK_01"
+
+          # --------------------------------------------------
+          # 3.12 INDIVIDUAL GRANT DEFINITIONS
+          # --------------------------------------------------
+
+          create_sql_file \
+            "${PROJECT_DIR}/sources/definitions/grants/sample_grant_01.sql" \
+            "GRANT DEFINITION" \
+            "SAMPLE_GRANT_01"
+
+          # --------------------------------------------------
+          # 3.13 CREATE COMMON MACRO
           # --------------------------------------------------
 
           if [ ! -f "${PROJECT_DIR}/sources/macros/common.sql" ]; then
+
             cat > "${PROJECT_DIR}/sources/macros/common.sql" <<'EOF'
-          -- Common reusable SQL macros
+          -- ==================================================
+          -- COMMON DCM SQL MACROS
+          -- ==================================================
           --
-          -- Purpose:
-          -- Maintain reusable SQL logic for this DCM project.
+          -- Maintain reusable Jinja2 macros here.
           --
-          -- Add project-level macros supported by Snowflake DCM.
+          -- These macros are automatically available
+          -- to DCM definition files.
+          --
+          -- Add valid Snowflake DCM macros here.
+          --
+          -- ==================================================
           EOF
+
           fi
 
           # --------------------------------------------------
-          # 4. CREATE PROJECT GITIGNORE
+          # 3.14 CREATE PROJECT GITIGNORE
           # --------------------------------------------------
 
           if [ ! -f "${PROJECT_DIR}/.gitignore" ]; then
+
             cat > "${PROJECT_DIR}/.gitignore" <<'EOF'
           .DS_Store
           *.log
@@ -168,11 +372,13 @@ jobs:
           .env
           .venv/
           __pycache__/
+          /out/
           EOF
+
           fi
 
           # --------------------------------------------------
-          # 5. CREATE DETAILED PROJECT README
+          # 3.15 CREATE PROJECT README
           # --------------------------------------------------
 
           if [ ! -f "${PROJECT_DIR}/README.md" ]; then
@@ -182,93 +388,108 @@ jobs:
 
           ## 1. Project Overview
 
-          This project manages Snowflake Data Cloud Management (DCM)
-          definitions for the Snowflake schema:
+          This project manages Snowflake Data Cloud Management
+          (DCM) definitions for the business schema:
 
-          **Schema Name:** ${SCHEMA_NAME}
+          **Business Schema:** ${SCHEMA_NAME}
 
-          **DCM Project Directory:** ${PROJECT_DIR}
+          **DCM Project:** ${PROJECT_PREFIX}
 
-          This project provides a standardized approach to managing
-          Snowflake database objects through Git-based version control
-          and Snowflake DCM Projects.
+          **DCM Project Owner:** ${PROJECT_OWNER}
 
-          The project is independently maintained within the
-          centralized Snowflake DCM Git repository.
+          This project uses Git-based version control to manage
+          Snowflake database object definitions.
 
           ## 2. Project Objectives
 
-          - Manage Snowflake database object definitions through Git.
-          - Maintain version-controlled SQL definitions.
+          - Maintain individual SQL files for database objects.
+          - Organize SQL definitions by object type.
           - Support DEV, QA, UAT and PROD environments.
-          - Standardize DCM project organization.
-          - Enable controlled environment promotion.
-          - Support automated DCM Plan and Deploy operations.
-          - Maintain deployment traceability and auditability.
+          - Maintain version-controlled definitions.
+          - Support controlled DCM Plan and Deploy operations.
+          - Provide deployment traceability.
 
           ## 3. Project Structure
 
           \`\`\`text
-          ${PROJECT_DIR}/
+          ${PROJECT_PREFIX}/
           |
           |-- manifest.yml
           |-- README.md
+          |-- .gitignore
           |
           |-- sources/
           |   |
           |   |-- definitions/
-          |   |   |-- database.sql
-          |   |   |-- schema.sql
-          |   |   |-- tables.sql
-          |   |   |-- views.sql
-          |   |   |-- procedures.sql
-          |   |   |-- functions.sql
-          |   |   |-- streams.sql
-          |   |   |-- tasks.sql
-          |   |   |-- grants.sql
-          |   |   |-- streamlit.sql
+          |   |   |
+          |   |   |-- database/
+          |   |   |-- schemas/
+          |   |   |-- tables/
+          |   |   |-- views/
+          |   |   |-- procedures/
+          |   |   |-- functions/
+          |   |   |-- streams/
+          |   |   |-- tasks/
+          |   |   |-- grants/
           |   |
           |   |-- macros/
           |       |-- common.sql
-          |
           \`\`\`
 
-          ## 4. File Descriptions
+          ## 4. SQL File Organization
 
-          ### manifest.yml
+          Each database object must be maintained in
+          an independent SQL definition file.
 
-          Defines the DCM project configuration, environment targets,
-          Snowflake project names, project owners and templating
-          configurations.
-
-          ### sources/definitions/
-
-          Contains Snowflake SQL definitions managed by this project.
-
-          | File | Description |
+          | Folder | Purpose |
           |---|---|
-          | database.sql | Database definitions |
-          | schema.sql | Schema definitions |
-          | tables.sql | Table definitions |
-          | views.sql | View definitions |
-          | procedures.sql | Stored procedure definitions |
-          | functions.sql | User-defined functions |
-          | streams.sql | Snowflake stream definitions |
-          | tasks.sql | Snowflake task definitions |
-          | grants.sql | Access and privilege definitions |
-          | streamlit.sql | Streamlit definitions |
+          | database | Database definitions |
+          | schemas | Schema definitions |
+          | tables | Individual table definitions |
+          | views | Individual view definitions |
+          | procedures | Individual stored procedures |
+          | functions | Individual function definitions |
+          | streams | Individual stream definitions |
+          | tasks | Individual task definitions |
+          | grants | Individual grant definitions |
 
-          Use the appropriate files to organize valid DCM-supported
-          SQL definitions.
+          Example:
 
-          ### sources/macros/
+          \`\`\`text
+          tables/
+          |
+          |-- customer.sql
+          |-- orders.sql
+          |-- products.sql
+          |-- employees.sql
+          \`\`\`
 
-          Contains reusable SQL macros and common project-level
-          SQL logic supported by the DCM templating model.
+          Every object should have its own SQL file.
 
-          ## 5. Environment Configuration
+          Additional object files can be created without
+          changing the GitHub Actions workflow.
 
-          This project supports four environments.
+          ## 5. Manifest Configuration
+
+          The manifest.yml contains:
+
+          - Snowflake account identifier.
+          - DEV, QA, UAT and PROD targets.
+          - Environment-specific DCM project names.
+          - Project owner role.
+          - Templating configurations.
+
+          The DCM project objects are located under:
+
+          ${DCM_DATABASE}.${DCM_SCHEMA}
+
+          The managed business schema is:
+
+          ${SCHEMA_NAME}
+
+          These are separate configuration concepts.
+
+          ## 6. Environment Configuration
 
           | Environment | DCM Project |
           |---|---|
@@ -277,149 +498,78 @@ jobs:
           | UAT | ${PROJECT_PREFIX}_UAT |
           | PROD | ${PROJECT_PREFIX}_PROD |
 
-          Each environment must reference its corresponding
-          Snowflake DCM project.
-
-          ## 6. Manifest Configuration
-
-          The manifest.yml file contains the environment-specific
-          project configuration.
-
-          Before deployment, configure and validate:
-
-          - Snowflake account identifier.
-          - Snowflake database.
-          - Snowflake schema containing the DCM projects.
-          - DCM project names.
-          - Project owner and required privileges.
-          - Environment-specific templating configurations.
-
-          The generated manifest includes placeholder account,
-          database and schema values. Replace them with actual
-          Snowflake configuration values.
-
-          Do not assume the managed business schema and the schema
-          containing the DCM project objects are necessarily the same.
-
           ## 7. Development Guidelines
 
-          1. Make database definition changes in the appropriate
-             SQL definition file.
-          2. Review the SQL changes before committing.
-          3. Follow the organization's Git branching strategy.
-          4. Use Pull Requests for controlled promotions.
-          5. Execute DCM Plan before deployment.
-          6. Review the proposed changes.
-          7. Execute deployment only after appropriate approval.
-          8. Validate the deployed database objects.
+          1. Create one SQL file per database object.
+          2. Place the file in the corresponding object folder.
+          3. Use valid Snowflake DCM DEFINE, GRANT or ATTACH syntax.
+          4. Follow consistent object naming conventions.
+          5. Commit changes to the appropriate Git branch.
+          6. Execute DCM Plan.
+          7. Review proposed changes.
+          8. Deploy after required approvals.
+          9. Validate the deployed objects.
 
-          ## 8. Deployment Lifecycle
+          ## 8. Deployment Promotion
 
-          Recommended promotion sequence:
+          Recommended sequence:
 
           DEV -> QA -> UAT -> PROD
 
-          ### DEV
-
-          - Develop and maintain SQL definitions.
-          - Validate DCM project changes.
-          - Execute DCM Plan.
-          - Deploy approved development changes.
-
-          ### QA
-
-          - Promote approved DEV changes.
-          - Execute DCM Plan against QA.
-          - Deploy approved changes.
-          - Perform integration and regression testing.
-
-          ### UAT
-
-          - Promote approved QA changes.
-          - Execute DCM Plan against UAT.
-          - Deploy approved changes.
-          - Complete business acceptance testing.
-
-          ### PROD
-
-          - Promote approved UAT changes.
-          - Obtain production change approval.
-          - Execute DCM Plan against PROD.
-          - Review the proposed changes.
-          - Deploy approved changes.
-          - Validate production database objects.
+          - DEV: Development and initial validation.
+          - QA: Integration and regression testing.
+          - UAT: Business acceptance testing.
+          - PROD: Approved production deployment.
 
           ## 9. Deployment Prerequisites
 
-          Before executing deployments, ensure:
+          - DCM project objects must exist in Snowflake.
+          - Manifest values must be validated.
+          - Project owner roles must be configured.
+          - Required Snowflake privileges must be granted.
+          - Snowflake CLI must be configured.
+          - Secure authentication must be available.
+          - SQL definitions must contain valid DCM syntax.
 
-          - The corresponding Snowflake DCM project exists.
-          - manifest.yml references the correct targets.
-          - The required project owner is configured.
-          - Appropriate Snowflake privileges are available.
-          - Snowflake CLI and required DCM commands are configured.
-          - Secure authentication is configured.
-          - The deployment process has been validated.
+          ## 10. Important Considerations
 
-          ## 10. Git and Change Management
+          - Bootstrap creates Git directories and files only.
+          - It does not create Snowflake DCM project objects.
+          - It does not create database objects.
+          - Generated SQL files are starter templates.
+          - Replace templates with actual DCM definitions.
+          - Existing SQL files are preserved during bootstrap.
+          - Existing manifest.yml is preserved during bootstrap.
+          - Git deletion does not automatically drop Snowflake objects.
 
-          - Maintain version-controlled SQL definitions.
-          - Use meaningful commit messages.
-          - Review changes through Pull Requests.
-          - Protect higher-environment branches.
-          - Obtain required approvals before production deployment.
-          - Maintain deployment evidence and execution logs.
+          ## 11. Project Ownership
 
-          ## 11. Security Guidelines
+          Project Owner: ${PROJECT_OWNER}
 
-          - Never commit Snowflake passwords or private keys.
-          - Store authentication information in approved
-            secrets management solutions.
-          - Follow least-privilege access principles.
-          - Restrict production deployment permissions.
-          - Review grants and role changes before deployment.
+          Business Schema: ${SCHEMA_NAME}
 
-          ## 12. Important Considerations
+          Environments: DEV, QA, UAT, PROD
 
-          - This project README is generated during bootstrap.
-          - Bootstrap creates Git files and directories only.
-          - Bootstrap does not create Snowflake DCM projects.
-          - SQL placeholder files must be populated with valid
-            DCM definitions.
-          - Manifest placeholders must be configured before use.
-          - DCM Plan and Deploy workflows must be configured
-            before automated deployment.
-          - Deleting this Git project does not drop Snowflake objects.
+          Framework: Snowflake DCM with GitHub Actions
 
-          ## 13. Support and Maintenance
-
-          The project maintainers are responsible for:
-
-          - Maintaining SQL definitions.
-          - Maintaining manifest configuration.
-          - Reviewing project changes.
-          - Managing environment promotions.
-          - Monitoring deployment execution.
-          - Maintaining project documentation.
-
-          ---
-
-          **Project:** ${PROJECT_PREFIX}
-
-          **Snowflake Schema:** ${SCHEMA_NAME}
-
-          **Managed Environments:** DEV, QA, UAT, PROD
-
-          **Documentation:** Schema-specific DCM project guide.
           EOF
 
           fi
 
-          # --------------------------------------------------
-          # 6. CREATE DCM PLAN WORKFLOW PLACEHOLDER
-          # --------------------------------------------------
+          echo "DCM project structure successfully created."
+
+      # --------------------------------------------------
+      # 4. CREATE DCM PLAN WORKFLOW PLACEHOLDER
+      # --------------------------------------------------
+
+      - name: Create DCM Plan workflow placeholder
+        shell: bash
+        run: |
+
+          set -euo pipefail
 
           if [ ! -f ".github/workflows/dcm-plan.yml" ]; then
+
             cat > ".github/workflows/dcm-plan.yml" <<'EOF'
           name: Snowflake DCM Plan
 
@@ -429,20 +579,32 @@ jobs:
           jobs:
             dcm-plan:
               runs-on: ubuntu-latest
+
               steps:
                 - name: Checkout repository
                   uses: actions/checkout@v4
 
-                - name: DCM Plan
-                  run: echo "Configure Snowflake DCM Plan command here"
+                - name: Configure Snowflake CLI
+                  run: echo "Configure Snowflake CLI here"
+
+                - name: Execute DCM Plan
+                  run: echo "Configure snow dcm plan here"
           EOF
+
           fi
 
-          # --------------------------------------------------
-          # 7. CREATE DCM DEPLOY WORKFLOW PLACEHOLDER
-          # --------------------------------------------------
+      # --------------------------------------------------
+      # 5. CREATE DCM DEPLOY WORKFLOW PLACEHOLDER
+      # --------------------------------------------------
+
+      - name: Create DCM Deploy workflow placeholder
+        shell: bash
+        run: |
+
+          set -euo pipefail
 
           if [ ! -f ".github/workflows/dcm-deploy.yml" ]; then
+
             cat > ".github/workflows/dcm-deploy.yml" <<'EOF'
           name: Snowflake DCM Deploy
 
@@ -452,64 +614,67 @@ jobs:
           jobs:
             dcm-deploy:
               runs-on: ubuntu-latest
+
               steps:
                 - name: Checkout repository
                   uses: actions/checkout@v4
 
-                - name: DCM Deploy
-                  run: echo "Configure Snowflake DCM Deploy command here"
+                - name: Configure Snowflake CLI
+                  run: echo "Configure Snowflake CLI here"
+
+                - name: Execute DCM Deploy
+                  run: echo "Configure snow dcm deploy here"
           EOF
+
           fi
 
-          # --------------------------------------------------
-          # 8. GENERATE LIST OF ALL DCM PROJECTS
-          # --------------------------------------------------
+      # --------------------------------------------------
+      # 6. GENERATE REPOSITORY PROJECT INVENTORY
+      # --------------------------------------------------
+
+      - name: Generate repository README
+        shell: bash
+        env:
+          SCHEMA_NAME: ${{ inputs.schema_name }}
+        run: |
+
+          set -euo pipefail
 
           PROJECT_LIST=""
 
+          shopt -s nullglob
+
           for dir in DCM_*; do
-            if [ -d "${dir}" ]; then
+
+            if [ -d "${dir}" ] && [ -f "${dir}/manifest.yml" ]; then
+
               PROJECT_SCHEMA="${dir#DCM_}"
 
               PROJECT_LIST="${PROJECT_LIST}- **${PROJECT_SCHEMA}** - \`${dir}\`"$'\n'
+
             fi
+
           done
 
-          # --------------------------------------------------
-          # 9. CREATE DETAILED REPOSITORY README
-          # --------------------------------------------------
+          if [ -z "${PROJECT_LIST}" ]; then
+            PROJECT_LIST="- No DCM projects found yet."
+          fi
 
-          cat > "README.md" <<EOF
+          cat > README.md <<EOF
           # Snowflake DCM Git Repository
 
           ## 1. Overview
 
-          This repository provides a centralized Git-based framework
-          for managing Snowflake Data Cloud Management (DCM) Projects.
+          Centralized Git repository for managing Snowflake
+          Data Cloud Management (DCM) projects.
 
-          The repository supports multiple Snowflake schemas, with
-          each schema maintained through an independent DCM project.
-
-          The implementation provides:
-
-          - Standardized DCM project structures.
-          - Multiple schema management within one repository.
-          - Git-based SQL version control.
-          - DEV, QA, UAT and PROD environment support.
-          - Automated project structure creation.
-          - Controlled code promotion.
-          - DCM Plan and Deploy workflow integration.
-          - Change traceability and deployment governance.
+          Each business schema is maintained through
+          an independent DCM project.
 
           ## 2. Repository Architecture
 
-          Each Snowflake schema is maintained as a separate
-          DCM project directory.
-
-          Example:
-
           \`\`\`text
-          SNOWFLAKE_SCHEMA01/
+          Repository/
           |
           |-- .github/
           |   |-- workflows/
@@ -518,345 +683,140 @@ jobs:
           |       |-- dcm-plan.yml
           |       |-- dcm-deploy.yml
           |
-          |-- DCM_TPCH_SF1/
+          |-- DCM_SCHEMA01/
           |   |-- manifest.yml
           |   |-- README.md
           |   |-- sources/
+          |       |-- definitions/
+          |       |   |-- database/
+          |       |   |-- schemas/
+          |       |   |-- tables/
+          |       |   |-- views/
+          |       |   |-- procedures/
+          |       |   |-- functions/
+          |       |   |-- streams/
+          |       |   |-- tasks/
+          |       |   |-- grants/
+          |       |
+          |       |-- macros/
           |
-          |-- DCM_SALES/
-          |   |-- manifest.yml
-          |   |-- README.md
-          |   |-- sources/
-          |
+          |-- DCM_SCHEMA02/
           |-- README.md
           \`\`\`
 
-          The project directories are created dynamically
-          using the Snowflake schema name provided during bootstrap.
-
-          ## 3. Supported Environments
-
-          | Environment | Git Branch | Purpose |
-          |---|---|---|
-          | DEV | dev | Development and initial validation |
-          | QA | qa | Integration and quality testing |
-          | UAT | uat | Business acceptance testing |
-          | PROD | prod | Production deployment |
-
-          Each DCM project has independent environment targets.
-
-          ## 4. Current DCM Projects
-
-          The following DCM projects are present in this repository:
+          ## 3. Current DCM Projects
 
           ${PROJECT_LIST}
 
-          Each project has its own manifest.yml, README.md,
-          SQL definitions and reusable macros.
+          ## 4. Supported Environments
+
+          | Environment | Branch |
+          |---|---|
+          | DEV | dev |
+          | QA | qa |
+          | UAT | uat |
+          | PROD | prod |
 
           ## 5. Creating a New DCM Project
 
-          Use the GitHub Actions Bootstrap workflow.
+          1. Navigate to GitHub Actions.
+          2. Select Bootstrap Snowflake DCM Project Structure.
+          3. Click Run workflow.
+          4. Select the target Git branch.
+          5. Enter the Snowflake business schema name.
+          6. Enter the Snowflake account identifier.
+          7. Enter the DCM database.
+          8. Enter the DCM schema.
+          9. Execute the workflow.
 
-          ### Step 1: Open GitHub Actions
+          ## 6. Generated Project Structure
 
-          1. Open this GitHub repository.
-          2. Select Actions.
-          3. Select Bootstrap Snowflake DCM Project Structure.
-          4. Click Run workflow.
+          The workflow automatically creates:
 
-          ### Step 2: Enter Workflow Inputs
+          - DCM project directory.
+          - Environment-specific manifest.yml.
+          - Separate SQL folders by object type.
+          - Individual SQL starter files.
+          - Common macro file.
+          - Project README.
+          - DCM Plan workflow placeholder.
+          - DCM Deploy workflow placeholder.
 
-          | Input | Description | Example |
-          |---|---|---|
-          | target_branch | Target Git branch | dev |
-          | schema_name | Snowflake schema name | SALES |
+          ## 7. SQL Definition Management
 
-          The schema name must be entered manually.
+          Each database object must have its own SQL file.
 
-          Supported characters:
-          - Letters A-Z and a-z.
-          - Numbers 0-9.
-          - Underscore.
-
-          The first character must be a letter or underscore.
-
-          ### Step 3: Execute Bootstrap
-
-          Click Run workflow.
-
-          The workflow automatically:
-
-          1. Checks out the selected branch.
-          2. Validates the schema name.
-          3. Creates the DCM project directory.
-          4. Creates sources/definitions and sources/macros.
-          5. Generates manifest.yml.
-          6. Generates SQL definition placeholders.
-          7. Generates the project-level README.md.
-          8. Creates DCM Plan and Deploy placeholders if absent.
-          9. Updates this repository-level README.md.
-          10. Commits and pushes the changes.
-
-          ### Step 4: Verify the Results
-
-          Navigate to the selected Git branch and verify
-          the generated DCM project directory and documentation.
-
-          ## 6. DCM Project Configuration
-
-          Each DCM project contains a manifest.yml file.
-
-          It defines:
-
-          - Manifest version.
-          - DCM project type.
-          - Default deployment target.
-          - Snowflake account identifier.
-          - DCM project names.
-          - Project owners.
-          - Environment-specific templating configurations.
-
-          The generated manifest contains placeholders for
-          the Snowflake account, database and DCM project schema.
-
-          These values must be configured before deployment.
-
-          ## 7. Git Branching and Promotion Strategy
-
-          Recommended environment promotion:
+          For example:
 
           \`\`\`text
-          DEV
-           |
-           v
-          QA
-           |
-           v
-          UAT
-           |
-           v
-          PROD
+          definitions/
+          |
+          |-- tables/
+          |   |-- customer.sql
+          |   |-- orders.sql
+          |   |-- products.sql
+          |
+          |-- views/
+          |   |-- customer_view.sql
+          |   |-- order_view.sql
+          |
+          |-- procedures/
+          |   |-- process_orders.sql
           \`\`\`
 
-          ### DEV
+          New SQL files can be added without modifying
+          the bootstrap workflow.
 
-          - Develop and maintain SQL definitions.
-          - Perform initial validation.
-          - Execute DCM Plan.
-          - Deploy development changes.
+          ## 8. Git Promotion Strategy
 
-          ### QA
+          DEV -> QA -> UAT -> PROD
 
-          - Promote approved DEV changes.
-          - Execute DCM Plan.
-          - Perform integration testing.
-          - Complete regression testing.
+          Use Pull Requests, branch protection and approvals
+          to control environment promotions.
 
-          ### UAT
+          ## 9. Snowflake Deployment
 
-          - Promote approved QA changes.
-          - Execute DCM Plan.
-          - Complete business acceptance testing.
-          - Obtain business approval.
+          The DCM Plan and Deploy workflows are generated
+          as placeholders.
 
-          ### PROD
+          Configure Snowflake CLI, authentication and actual
+          DCM commands before using automated deployments.
 
-          - Promote approved UAT changes.
-          - Obtain production change approval.
-          - Execute DCM Plan.
-          - Deploy approved changes.
-          - Perform post-deployment validation.
+          ## 10. Security
 
-          Use Pull Requests and branch protection to control
-          promotions across environments.
+          The bootstrap workflow uses BOOTSTRAP_TOKEN
+          for repository checkout and push operations.
 
-          ## 8. GitHub Actions Workflows
+          Snowflake credentials must be stored securely.
 
-          ### bootstrap-structure.yml
+          Never commit passwords, private keys or tokens.
 
-          Creates a standardized DCM project structure.
+          ## 11. Important Considerations
 
-          Inputs:
-          - Target branch.
-          - Snowflake schema name.
-
-          It creates the project directory, manifest, SQL
-          definition placeholders and detailed documentation.
-
-          ### delete-structure.yml
-
-          Removes a selected DCM project directory from
-          the selected Git branch.
-
-          The deletion workflow should validate the requested
-          project and require explicit confirmation.
-
-          Deleting Git files does not automatically delete
-          Snowflake DCM projects or database objects.
-
-          ### dcm-plan.yml
-
-          Intended to execute Snowflake DCM Plan operations.
-
-          The configured workflow should identify proposed
-          changes and provide deployment review information.
-
-          ### dcm-deploy.yml
-
-          Intended to execute approved Snowflake DCM Deploy
-          operations.
-
-          The configured workflow should support environment
-          selection, deployment execution, and logging.
-
-          Note: DCM Plan and Deploy workflows are placeholders
-          until Snowflake CLI, authentication and actual DCM
-          commands are configured.
-
-          ## 9. Snowflake Prerequisites
-
-          Before deploying a DCM project, verify:
-
-          1. The required Snowflake DCM projects exist.
-          2. DEV, QA, UAT and PROD targets are configured.
-          3. The manifest references the correct project names.
-          4. The project owners are configured.
-          5. Required Snowflake privileges are granted.
-          6. The appropriate Snowflake CLI and DCM functionality
-             is available.
-          7. Authentication is securely configured.
-          8. The project definitions are valid.
-
-          ## 10. GitHub Security and Permissions
-
-          ### Repository Secret
-
-          Configure:
-
-          | Secret | Purpose |
-          |---|---|
-          | BOOTSTRAP_TOKEN | Checkout and push authentication |
-
-          The token must have appropriate repository access
-          and Contents Read and Write permissions.
-
-          ### Workflow Permissions
-
-          The bootstrap workflow uses:
-
-          \`\`\`yaml
-          permissions:
-            contents: write
-          \`\`\`
-
-          ### Snowflake Authentication
-
-          Use an approved Snowflake authentication mechanism.
-
-          Store sensitive credentials in GitHub Secrets
-          or an approved enterprise secrets management solution.
-
-          Never commit passwords, private keys or access tokens.
-
-          ## 11. Deployment Process
-
-          Recommended execution sequence:
-
-          1. Bootstrap the DCM project.
-          2. Configure manifest.yml.
-          3. Add valid SQL definitions.
-          4. Review and commit changes in DEV.
-          5. Execute DCM Plan.
-          6. Review proposed changes.
-          7. Deploy to DEV.
-          8. Promote changes to QA.
-          9. Complete QA testing.
-          10. Promote changes to UAT.
-          11. Obtain business acceptance.
-          12. Promote changes to PROD.
-          13. Obtain production approval.
-          14. Execute production deployment.
-          15. Validate and capture deployment evidence.
-
-          ## 12. Naming Conventions
-
-          | Component | Naming Convention | Example |
-          |---|---|---|
-          | Project directory | DCM_SCHEMA | DCM_SALES |
-          | DEV project | DCM_SCHEMA_DEV | DCM_SALES_DEV |
-          | QA project | DCM_SCHEMA_QA | DCM_SALES_QA |
-          | UAT project | DCM_SCHEMA_UAT | DCM_SALES_UAT |
-          | PROD project | DCM_SCHEMA_PROD | DCM_SALES_PROD |
-          | Project owner | DCM_SCHEMA_DEPLOYER | DCM_SALES_DEPLOYER |
-
-          ## 13. Operational Guidelines
-
-          - Maintain one independent DCM project per schema.
-          - Use consistent naming conventions.
-          - Preserve existing project definitions.
-          - Review manifest configuration before deployment.
-          - Use Pull Requests for code promotion.
-          - Protect higher-environment branches.
-          - Obtain production deployment approvals.
-          - Maintain deployment logs and evidence.
-          - Follow organizational change management procedures.
-          - Do not store sensitive credentials in Git.
-
-          ## 14. Important Considerations
-
-          - Bootstrap creates Git repository structures only.
-          - Bootstrap does not create Snowflake DCM projects.
-          - Bootstrap does not deploy database objects.
-          - SQL placeholders must be populated with valid definitions.
-          - Manifest placeholders must be replaced with actual values.
-          - Plan and Deploy workflows require additional configuration.
-          - Git branch promotion and Snowflake deployment
-            are separate operations.
-          - Removing a project directory from Git does not
-            automatically remove Snowflake objects.
-
-          ## 15. Future Enhancements
-
-          Potential implementation enhancements:
-
-          - Automated DCM Plan execution.
-          - Automated DCM Deploy execution.
-          - Snowflake CLI integration.
-          - Environment-specific deployment configuration.
-          - Pull Request validation.
-          - Automated deployment approvals.
-          - Deployment audit and status reporting.
-          - Git tag-based release management.
-          - Rollback and recovery procedures.
-          - Multi-schema deployment orchestration.
-
-          ## 16. Ownership and Maintenance
-
-          Repository maintainers are responsible for:
-
-          - Maintaining GitHub Actions workflows.
-          - Managing repository access and permissions.
-          - Maintaining DCM project configurations.
-          - Reviewing SQL definitions.
-          - Managing environment promotions.
-          - Monitoring deployments.
-          - Maintaining documentation.
+          - Bootstrap creates Git structures only.
+          - Snowflake DCM objects must be created separately.
+          - SQL templates must be replaced with valid definitions.
+          - Existing project files are preserved.
+          - Git deletion does not drop Snowflake objects.
+          - Git promotion and Snowflake deployment are separate.
 
           ---
 
-          **Repository:** SNOWFLAKE_SCHEMA01
+          Repository: SNOWFLAKE_SCHEMA01
 
-          **Framework:** Snowflake DCM with GitHub
+          Framework: Snowflake DCM with GitHub Actions
 
-          **Supported Environments:** DEV, QA, UAT, PROD
+          Supported Environments: DEV, QA, UAT, PROD
 
-          **Project Strategy:** One independent DCM project per schema
+          Strategy: One DCM project per business schema.
 
-          **Documentation:** Repository-level and project-level README files
           EOF
 
-          echo "DCM project structure and documentation created successfully."
+          echo "Repository README generated successfully."
+
+      # --------------------------------------------------
+      # 7. COMMIT AND PUSH CHANGES
+      # --------------------------------------------------
 
       - name: Commit and push structure
         shell: bash
@@ -864,19 +824,26 @@ jobs:
           TARGET_BRANCH: ${{ inputs.target_branch }}
           SCHEMA_NAME: ${{ inputs.schema_name }}
         run: |
-          set -e
+
+          set -euo pipefail
 
           git config user.name "github-actions[bot]"
+
           git config user.email \
             "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add -A
 
           if git diff --cached --quiet; then
+
             echo "No changes required."
+
           else
+
             git commit -m "Initialize DCM project for ${SCHEMA_NAME}"
+
             git push origin "HEAD:${TARGET_BRANCH}"
 
-            echo "Successfully pushed DCM project and documentation."
+            echo "Successfully pushed DCM project structure."
+
           fi
