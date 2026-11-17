@@ -558,6 +558,7 @@ jobs:
 
           echo "DCM project structure successfully created."
 
+
       # --------------------------------------------------
       # 4. CREATE DCM PLAN WORKFLOW PLACEHOLDER
       # --------------------------------------------------
@@ -568,28 +569,37 @@ jobs:
 
           set -euo pipefail
 
+          # Ensure workflow directory exists
+          mkdir -p ".github/workflows"
+
           if [ ! -f ".github/workflows/dcm-plan.yml" ]; then
 
             cat > ".github/workflows/dcm-plan.yml" <<'EOF'
-          name: Snowflake DCM Plan
+name: Snowflake DCM Plan
 
-          on:
-            workflow_dispatch:
+on:
+  workflow_dispatch:
 
-          jobs:
-            dcm-plan:
-              runs-on: ubuntu-latest
+jobs:
+  dcm-plan:
+    runs-on: ubuntu-latest
 
-              steps:
-                - name: Checkout repository
-                  uses: actions/checkout@v4
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-                - name: Configure Snowflake CLI
-                  run: echo "Configure Snowflake CLI here"
+      - name: Configure Snowflake CLI
+        run: echo "Configure Snowflake CLI here"
 
-                - name: Execute DCM Plan
-                  run: echo "Configure snow dcm plan here"
-          EOF
+      - name: Execute DCM Plan
+        run: echo "Configure snow dcm plan here"
+EOF
+
+            echo "Created dcm-plan.yml"
+
+          else
+
+            echo "Existing dcm-plan.yml preserved."
 
           fi
 
