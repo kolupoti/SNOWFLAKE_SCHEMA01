@@ -2,7 +2,7 @@ CALL DCM_ADMIN_DB.PROJECTS.DDL_TO_DCM_DEFINITIONS(
     'DCM_ADMIN_DB',                -- source database
     ['PUBLIC'],               -- only the CDGC schema
     NULL,                   -- all object types
-    'snow://workspace/USER$.PUBLIC."SNOWFLAKE_SCHEMA01"/versions/live/DCM_PUBLIC'
+    'snow://workspace/USER$.PUBLIC."SNOWFLAKE_SCHEMA01"/versions/live/'
 );
 
 snow://workspace/USER$.PUBLIC."SNOWFLAKE_SCHEMA01"/versions/live/DCM_TPCH_SF1/sources/definations/DCM_ADMIN_DB/PUBLIC/tables/DEPARTMENT.sql
