@@ -1,0 +1,12 @@
+-- ==================================================
+-- COMMON DCM SQL MACROS
+-- ==================================================
+--
+-- Maintain reusable Jinja2 macros here.
+--
+-- These macros are automatically available
+-- to DCM definition files.
+--
+-- Add valid Snowflake DCM macros here.
+--
+-- ==================================================

@@ -1,0 +1,17 @@
+-- ==================================================
+-- SCHEMA DEFINITION
+-- ==================================================
+--
+-- DCM Project : DCM_PUBLIC
+-- Business Schema : PUBLIC
+-- Object Name : PUBLIC
+--
+-- Add the corresponding Snowflake DCM definition.
+--
+-- IMPORTANT:
+-- DCM definition files must use supported DEFINE,
+-- GRANT or ATTACH statements.
+--
+-- Replace this template with a valid DCM definition.
+--
+-- ==================================================
