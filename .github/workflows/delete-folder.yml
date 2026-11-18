@@ -1,0 +1,75 @@
+
+name: Delete Folder from Repository
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: "Branch from which the folder should be deleted"
+        required: true
+        type: choice
+        options:
+          - dev
+          - qa
+          - uat
+          - prod
+
+      folder_name:
+        description: "Folder name to delete (example: DCM_ADMIN_DB)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  delete-folder:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Target Branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_branch }}
+          fetch-depth: 0
+
+      - name: Validate Folder Name
+        shell: bash
+        run: |
+          FOLDER="${{ inputs.folder_name }}"
+
+          if [[ -z "$FOLDER" ]]; then
+            echo "Error: Folder name cannot be empty."
+            exit 1
+          fi
+
+          if [[ "$FOLDER" == /* || "$FOLDER" == *".."* || "$FOLDER" == *"\\"* ]]; then
+            echo "Error: Invalid folder path."
+            exit 1
+          fi
+
+          if [[ ! -d "$FOLDER" ]]; then
+            echo "Error: Folder does not exist: $FOLDER"
+            exit 1
+          fi
+
+          echo "Folder validation successful: $FOLDER"
+
+      - name: Delete Folder
+        shell: bash
+        run: |
+          git rm -r -- "${{ inputs.folder_name }}"
+
+      - name: Commit and Push Changes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git commit -m "Delete folder ${{ inputs.folder_name }}"
+          git push origin "${{ inputs.target_branch }}"
+
+      - name: Deletion Summary
+        run: |
+          echo "Folder '${{ inputs.folder_name }}' deleted successfully."
+          echo "Target branch: ${{ inputs.target_branch }}"
