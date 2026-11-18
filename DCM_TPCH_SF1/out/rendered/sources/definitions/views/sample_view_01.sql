@@ -1,0 +1,17 @@
+-- ==================================================
+-- VIEW DEFINITION
+-- ==================================================
+--
+-- DCM Project : DCM_TPCH_SF1
+-- Business Schema : TPCH_SF1
+-- Object Name : SAMPLE_VIEW_01
+--
+-- Add the corresponding Snowflake DCM definition.
+--
+-- IMPORTANT:
+-- DCM definition files must use supported DEFINE,
+-- GRANT or ATTACH statements.
+--
+-- Replace this template with a valid DCM definition.
+--
+-- ==================================================
