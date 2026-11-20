@@ -78,3 +78,7 @@ GROUP BY
 
 
     SELECT CURRENT_ACCOUNT() AS ACCOUNT_IDENTIFIER;
+
+
+    git rm -r --cached "Environment Prep/"
+git commit -m "Exclude Environment Prep workspace from Git"
