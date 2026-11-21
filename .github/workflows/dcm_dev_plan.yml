@@ -20,55 +20,78 @@ jobs:
       SNOWFLAKE_PRIVATE_KEY_RAW: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
 
     steps:
-      # 1. Checkout repository
-      - name: Checkout repository
+
+      # 1. Checkout MAIN branch (workflow repository)
+      - name: Checkout MAIN branch
         uses: actions/checkout@v4
         with:
+          ref: main
+          path: workflow_source
           persist-credentials: false
 
-      # 2. Verify DCM project structure
+      # 2. Checkout DEV branch (DCM project)
+      - name: Checkout DEV branch
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          path: dcm_source
+          persist-credentials: false
+
+      # 3. Verify DCM project structure
       - name: Verify DCM project structure
         shell: bash
         run: |
-          echo "Repository root:"
-          pwd
-          echo "Repository contents:"
-          ls -la
+          echo "DCM project directory:"
+          ls -la dcm_source/my_dcm_project
 
-          if [ ! -f "my_dcm_project/manifest.yml" ]; then
-            echo "ERROR: DCM manifest not found."
-            echo "Available manifest files:"
-            find . -type f -name manifest.yml -not -path "./.git/*"
+          if [ ! -f "dcm_source/my_dcm_project/manifest.yml" ]; then
+            echo "ERROR: manifest.yml not found in DEV branch."
             exit 1
           fi
 
-          echo "DCM manifest found."
+          echo "DCM manifest found successfully."
 
-      # 3. Install Snowflake CLI
+      # 4. Install Snowflake CLI
       - name: Install Snowflake CLI
         uses: snowflakedb/snowflake-cli-action@v2
         with:
           cli-version: "3.24.0"
 
-      # 4. Test Snowflake connection
+      # 5. Test Snowflake connection
       - name: Test Snowflake connection
         shell: bash
         run: |
           snow connection test -x
 
-      # 5. Execute DCM PLAN against DEV
+      # 6. Execute DCM PLAN against DEV
       - name: DCM Plan - DEV
         shell: bash
         run: |
           set -o pipefail
 
           snow dcm plan \
-            --from my_dcm_project \
+            --from dcm_source/my_dcm_project \
             --target DEV \
             --save-output \
             -x 2>&1 | tee plan.txt
 
-      # 6. Upload DCM PLAN results
+      # 7. Verify DCM PLAN output
+      - name: Verify DCM PLAN output
+        if: success()
+        shell: bash
+        run: |
+          echo "Generated DCM PLAN files:"
+
+          ls -la dcm_source/my_dcm_project/out/
+
+          if [ ! -f "dcm_source/my_dcm_project/out/plan_result.json" ]; then
+            echo "ERROR: plan_result.json was not generated."
+            exit 1
+          fi
+
+          echo "DCM PLAN completed successfully."
+
+      # 8. Upload DCM PLAN results
       - name: Upload DCM Plan Results
         if: always()
         uses: actions/upload-artifact@v4
@@ -76,6 +99,6 @@ jobs:
           name: DCM-DEV-Plan-Results
           path: |
             plan.txt
-            my_dcm_project/out/plan_result.json
+            dcm_source/my_dcm_project/out/
           if-no-files-found: warn
           retention-days: 30
