@@ -20,7 +20,7 @@ jobs:
 
     steps:
 
-      # 1. Checkout Main branch containing this workflow
+      # 1. Checkout Main branch containing the workflow
       - name: Checkout Main Branch
         uses: actions/checkout@v4
         with:
@@ -40,18 +40,21 @@ jobs:
         run: |
           echo "Checking DCM project directory..."
 
-          if [ ! -d "dcm_source/my_dcm_project" ]; then
+          PROJECT_DIR="dcm_source/my_dcm_project"
+
+          if [ ! -d "$PROJECT_DIR" ]; then
             echo "ERROR: DCM project directory not found."
             exit 1
           fi
 
-          if [ ! -f "dcm_source/my_dcm_project/manifest.yml" ]; then
+          if [ ! -f "$PROJECT_DIR/manifest.yml" ]; then
             echo "ERROR: manifest.yml not found."
             exit 1
           fi
 
           echo "DCM project structure verified."
-          ls -la dcm_source/my_dcm_project/
+          echo "Project directory contents:"
+          ls -la "$PROJECT_DIR"
 
       # 4. Install Snowflake CLI with OIDC authentication
       - name: Install Snowflake CLI with OIDC
@@ -66,7 +69,7 @@ jobs:
           echo "Testing Snowflake OIDC connection..."
           snow connection test -x
 
-      # 6. Execute DCM PLAN
+      # 6. Execute DCM PLAN for DEV
       - name: DCM Plan - DEV
         run: |
           echo "Executing DCM PLAN for DEV..."
@@ -87,22 +90,48 @@ jobs:
           SOURCE_DIR="$PROJECT_DIR/out"
           TARGET_DIR="$PROJECT_DIR/migrated"
 
-          echo "Creating migrated directory..."
+          echo "Preparing migrated directory..."
+
+          # Remove any previous contents to avoid stale PLAN results
+          rm -rf "$TARGET_DIR"
+
+          # Create migrated directory
           mkdir -p "$TARGET_DIR"
 
+          # Copy DCM PLAN output from out to migrated
           if [ -d "$SOURCE_DIR" ]; then
-            echo "Copying PLAN output from out to migrated..."
 
-            cp -a "$SOURCE_DIR/." "$TARGET_DIR/"
+            echo "DCM out directory found."
 
-            echo "PLAN output copied successfully."
+            if [ -n "$(find "$SOURCE_DIR" -type f -print -quit)" ]; then
+
+              echo "Copying PLAN output files..."
+
+              cp -a "$SOURCE_DIR/." "$TARGET_DIR/"
+
+              echo "PLAN output copied successfully."
+
+            else
+
+              echo "WARNING: DCM out directory is empty."
+              touch "$TARGET_DIR/.keep"
+
+            fi
+
           else
-            echo "WARNING: out directory not found."
-            echo "migrated directory has been created but is empty."
+
+            echo "WARNING: DCM out directory was not generated."
+            echo "Creating placeholder file in migrated directory."
+
+            touch "$TARGET_DIR/.keep"
+
           fi
 
           echo "Migrated directory contents:"
           find "$TARGET_DIR" -maxdepth 5 -type f -print
+
+          echo "Migrated directory size:"
+          du -sh "$TARGET_DIR"
 
       # 8. Upload migrated directory as GitHub artifact
       - name: Upload DCM Plan Results
@@ -111,5 +140,5 @@ jobs:
         with:
           name: dcm-dev-plan-results
           path: dcm_source/my_dcm_project/migrated/
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 30
