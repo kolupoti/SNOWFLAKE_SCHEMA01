@@ -1,18 +1,18 @@
 manifest_version: 2
 type: DCM_PROJECT
-default_target: SANDBOX
+default_target: DEV
 
 targets:
-  SANDBOX:
-    account_identifier: MYORG-MYACCOUNT
+  DEV:
+    account_identifier: JLWGRJE-OR02911
     project_name: DCM_ADMIN_DB.PROJECTS.DCM_SANDBOX_PROJECT
-    project_owner: ACCOUNTADMIN --DCM_DEV_DEPLOYER
+    project_owner: ACCOUNTADMIN
     templating_config: DEV
 
   QA:
-    account_identifier: MYORG-MYACCOUNT
+    account_identifier: JLWGRJE-OR02911
     project_name: DCM_ADMIN_DB.PROJECTS.DCM_QA_PROJECT
-    project_owner: ACCOUNTADMIN --DCM_QA_DEPLOYER
+    project_owner: ACCOUNTADMIN
     templating_config: QA
 
   PROD:
