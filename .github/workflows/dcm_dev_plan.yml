@@ -37,13 +37,17 @@ jobs:
 
       # 3. Verify DCM project structure
       - name: Verify DCM Project Structure
+        shell: bash
         run: |
-          echo "Checking DCM project directory..."
+          set -euo pipefail
 
           PROJECT_DIR="dcm_source/my_dcm_project"
 
+          echo "Checking DCM project directory..."
+          echo "Current directory: $(pwd)"
+
           if [ ! -d "$PROJECT_DIR" ]; then
-            echo "ERROR: DCM project directory not found."
+            echo "ERROR: DCM project directory not found: $PROJECT_DIR"
             exit 1
           fi
 
@@ -65,77 +69,86 @@ jobs:
 
       # 5. Test Snowflake connection
       - name: Test Snowflake Connection
+        shell: bash
         run: |
+          set -euo pipefail
+
           echo "Testing Snowflake OIDC connection..."
           snow connection test -x
 
+          echo "Snowflake connection successful."
+
       # 6. Execute DCM PLAN for DEV
       - name: DCM Plan - DEV
+        shell: bash
         run: |
+          set -euo pipefail
+
+          PROJECT_DIR="dcm_source/my_dcm_project"
+
           echo "Executing DCM PLAN for DEV..."
+          echo "DCM project: $PROJECT_DIR"
+          echo "Target: DEV"
 
           snow dcm plan \
             --target DEV \
-            --from dcm_source/my_dcm_project \
+            --from "$PROJECT_DIR" \
             --save-output \
             -x
 
-          echo "DCM PLAN completed successfully."
+          echo "DCM PLAN command completed successfully."
 
-      # 7. Copy DCM PLAN output into migrated directory
+      # 7. Verify and copy DCM PLAN output
       - name: Prepare Migrated Directory
-        if: success()
+        shell: bash
         run: |
+          set -euo pipefail
+
           PROJECT_DIR="dcm_source/my_dcm_project"
           SOURCE_DIR="$PROJECT_DIR/out"
           TARGET_DIR="$PROJECT_DIR/migrated"
 
-          echo "Preparing migrated directory..."
+          echo "Checking DCM PLAN output..."
 
-          # Remove any previous contents to avoid stale PLAN results
-          rm -rf "$TARGET_DIR"
+          # Verify that Snowflake generated the output directory
+          if [ ! -d "$SOURCE_DIR" ]; then
+            echo "ERROR: DCM PLAN output directory was not generated."
+            echo "Expected location: $SOURCE_DIR"
 
-          # Create migrated directory
-          mkdir -p "$TARGET_DIR"
+            echo "Project directory contents:"
+            find "$PROJECT_DIR" -maxdepth 3 -print
 
-          # Copy DCM PLAN output from out to migrated
-          if [ -d "$SOURCE_DIR" ]; then
-
-            echo "DCM out directory found."
-
-            if [ -n "$(find "$SOURCE_DIR" -type f -print -quit)" ]; then
-
-              echo "Copying PLAN output files..."
-
-              cp -a "$SOURCE_DIR/." "$TARGET_DIR/"
-
-              echo "PLAN output copied successfully."
-
-            else
-
-              echo "WARNING: DCM out directory is empty."
-              touch "$TARGET_DIR/.keep"
-
-            fi
-
-          else
-
-            echo "WARNING: DCM out directory was not generated."
-            echo "Creating placeholder file in migrated directory."
-
-            touch "$TARGET_DIR/.keep"
-
+            exit 1
           fi
 
-          echo "Migrated directory contents:"
-          find "$TARGET_DIR" -maxdepth 5 -type f -print
+          # Verify that output contains actual files
+          FILE_COUNT=$(find "$SOURCE_DIR" -type f | wc -l)
+
+          if [ "$FILE_COUNT" -eq 0 ]; then
+            echo "ERROR: DCM PLAN output directory is empty."
+            echo "Expected output under: $SOURCE_DIR"
+            exit 1
+          fi
+
+          echo "Found $FILE_COUNT DCM PLAN output file(s)."
+
+          # Recreate migrated directory
+          rm -rf "$TARGET_DIR"
+          mkdir -p "$TARGET_DIR"
+
+          # Copy all output files and subdirectories
+          cp -a "$SOURCE_DIR/." "$TARGET_DIR/"
+
+          echo "DCM PLAN output copied successfully."
+
+          echo "Files in migrated directory:"
+          find "$TARGET_DIR" -type f -print
 
           echo "Migrated directory size:"
           du -sh "$TARGET_DIR"
 
       # 8. Upload migrated directory as GitHub artifact
       - name: Upload DCM Plan Results
-        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: dcm-dev-plan-results
