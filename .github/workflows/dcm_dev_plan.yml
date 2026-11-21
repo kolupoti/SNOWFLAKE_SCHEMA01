@@ -60,11 +60,10 @@ jobs:
           use-oidc: true
           cli-version: "3.24.0"
 
-      # 5. Verify Snowflake connection
+      # 5. Test Snowflake connection
       - name: Test Snowflake Connection
         run: |
           echo "Testing Snowflake OIDC connection..."
-
           snow connection test -x
 
       # 6. Execute DCM PLAN
@@ -78,31 +77,39 @@ jobs:
             --save-output \
             -x
 
-          echo "DCM PLAN command completed."
+          echo "DCM PLAN completed successfully."
 
-      # 7. Diagnose generated PLAN output
-      - name: Debug DCM Plan Output
-        if: always()
+      # 7. Copy DCM PLAN output into migrated directory
+      - name: Prepare Migrated Directory
+        if: success()
         run: |
-          echo "Current directory:"
-          pwd
+          PROJECT_DIR="dcm_source/my_dcm_project"
+          SOURCE_DIR="$PROJECT_DIR/out"
+          TARGET_DIR="$PROJECT_DIR/migrated"
 
-          echo "DCM project contents:"
-          ls -la dcm_source/my_dcm_project/
+          echo "Creating migrated directory..."
+          mkdir -p "$TARGET_DIR"
 
-          echo "Searching for output directories:"
-          find dcm_source/my_dcm_project \
-            -type d -name out -print
+          if [ -d "$SOURCE_DIR" ]; then
+            echo "Copying PLAN output from out to migrated..."
 
-          echo "Searching for generated files:"
-          find dcm_source/my_dcm_project \
-            -type f | head -100
+            cp -a "$SOURCE_DIR/." "$TARGET_DIR/"
 
-      # 8. Upload PLAN results
+            echo "PLAN output copied successfully."
+          else
+            echo "WARNING: out directory not found."
+            echo "migrated directory has been created but is empty."
+          fi
+
+          echo "Migrated directory contents:"
+          find "$TARGET_DIR" -maxdepth 5 -type f -print
+
+      # 8. Upload migrated directory as GitHub artifact
       - name: Upload DCM Plan Results
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: dcm-dev-plan-results
-          path: dcm_source/my_dcm_project/out/
+          path: dcm_source/my_dcm_project/migrated/
           if-no-files-found: warn
+          retention-days: 30
