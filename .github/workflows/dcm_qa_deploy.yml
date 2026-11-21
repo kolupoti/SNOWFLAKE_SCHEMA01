@@ -1,1 +1,46 @@
+name: DCM QA Deploy
+on:
+  push:
+    branches: [main]
+    paths: ["my_dcm_project/**"]
+  workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: dcm-qa-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: qa          # add required reviewers here = approval gate
+    defaults:
+      run:
+        working-directory: my_dcm_project
+    env:
+      SNOWFLAKE_ACCOUNT: JLWGRJE-OR02911
+      SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+      SNOWFLAKE_AUTHENTICATOR: SNOWFLAKE_JWT
+      SNOWFLAKE_PRIVATE_KEY_RAW: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: snowflakedb/snowflake-cli-action@v2
+        with:
+          cli-version: "3.16"
+
+      - name: Plan
+        run: snow dcm plan --target QA --save-output -x | tee plan.txt
+
+      - name: Block destructive DROPs
+        run: |
+          if grep -Ei 'DROP +(DATABASE|SCHEMA|TABLE|STAGE)' plan.txt; then
+            echo "::error::Plan contains a DROP. Review manually."; exit 1
+          fi
+
+      - name: Deploy
+        run: snow dcm deploy --target QA --alias "gh-${GITHUB_SHA::7}" -x
