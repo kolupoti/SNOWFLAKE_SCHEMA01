@@ -1,104 +1,65 @@
 
 name: DCM DEV Plan
 
-# Manual execution only
 on:
   workflow_dispatch:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   plan:
-    name: DCM Plan - DEV
+    name: Execute DCM PLAN - DEV
     runs-on: ubuntu-latest
 
     env:
-      SNOWFLAKE_ACCOUNT: JLWGRJE-OR02911
-      SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-      SNOWFLAKE_AUTHENTICATOR: SNOWFLAKE_JWT
-      SNOWFLAKE_PRIVATE_KEY_RAW: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+      SNOWFLAKE_ACCOUNT: ${{ vars.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: GITHUB_DCM_PLAN_USER
+      SNOWFLAKE_ROLE: GITHUB_DCM_PLAN_ROLE
 
     steps:
-
-      # 1. Checkout MAIN branch (workflow repository)
-      - name: Checkout MAIN branch
+      # Checkout the branch containing this workflow
+      - name: Checkout Main Branch
         uses: actions/checkout@v4
         with:
           ref: main
-          path: workflow_source
           persist-credentials: false
 
-      # 2. Checkout DEV branch (DCM project)
-      - name: Checkout DEV branch
+      # Checkout the DCM project from DEV
+      - name: Checkout DCM DEV Project
         uses: actions/checkout@v4
         with:
           ref: dev
           path: dcm_source
           persist-credentials: false
 
-      # 3. Verify DCM project structure
-      - name: Verify DCM project structure
-        shell: bash
-        run: |
-          echo "DCM project directory:"
-          ls -la dcm_source/my_dcm_project
-
-          if [ ! -f "dcm_source/my_dcm_project/manifest.yml" ]; then
-            echo "ERROR: manifest.yml not found in DEV branch."
-            exit 1
-          fi
-
-          echo "DCM manifest found successfully."
-
-      # 4. Install Snowflake CLI
-      - name: Install Snowflake CLI
-        uses: snowflakedb/snowflake-cli-action@v2
+      # Install Snowflake CLI and configure OIDC
+      - name: Install Snowflake CLI with OIDC
+        uses: snowflakedb/snowflake-actions@v3
         with:
+          use-oidc: true
           cli-version: "3.24.0"
 
-      # 5. Test Snowflake connection
-      - name: Test Snowflake connection
-        shell: bash
+      # Verify Snowflake connectivity
+      - name: Test Snowflake Connection
         run: |
           snow connection test -x
 
-      # 6. Execute DCM PLAN against DEV
+      # Execute DCM PLAN
       - name: DCM Plan - DEV
-        shell: bash
         run: |
-          set -o pipefail
-
           snow dcm plan \
-            --from dcm_source/my_dcm_project \
             --target DEV \
+            --from dcm_source/my_dcm_project \
             --save-output \
-            -x 2>&1 | tee plan.txt
+            -x
 
-      # 7. Verify DCM PLAN output
-      - name: Verify DCM PLAN output
-        if: success()
-        shell: bash
-        run: |
-          echo "Generated DCM PLAN files:"
-
-          ls -la dcm_source/my_dcm_project/out/
-
-          if [ ! -f "dcm_source/my_dcm_project/out/plan_result.json" ]; then
-            echo "ERROR: plan_result.json was not generated."
-            exit 1
-          fi
-
-          echo "DCM PLAN completed successfully."
-
-      # 8. Upload DCM PLAN results
+      # Save PLAN output as a GitHub artifact
       - name: Upload DCM Plan Results
-        if: always()
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: DCM-DEV-Plan-Results
-          path: |
-            plan.txt
-            dcm_source/my_dcm_project/out/
-          if-no-files-found: warn
-          retention-days: 30
+          name: dcm-dev-plan-results
+          path: dcm_source/my_dcm_project/out/
+          if-no-files-found: error
