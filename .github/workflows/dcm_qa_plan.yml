@@ -1,1 +1,46 @@
+name: DCM QA Plan
+on:
+  pull_request:
+    branches: [main]
+    paths: ["my_dcm_project/**"]
 
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: my_dcm_project
+    env:
+      SNOWFLAKE_ACCOUNT: JLWGRJE-OR02911
+      SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+      SNOWFLAKE_AUTHENTICATOR: SNOWFLAKE_JWT
+      SNOWFLAKE_PRIVATE_KEY_RAW: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: snowflakedb/snowflake-cli-action@v2
+        with:
+          cli-version: "3.16"
+
+      - name: DCM plan (QA)
+        run: snow dcm plan --target QA --save-output -x 2>&1 | tee plan.txt
+
+      - name: Post plan to PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let body = fs.readFileSync('my_dcm_project/plan.txt', 'utf8');
+            if (body.length > 60000) body = body.slice(0, 60000) + '\n... truncated';
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: context.issue.number,
+              body: '### DCM PLAN – QA\n```\n' + body + '\n```'
+            });
