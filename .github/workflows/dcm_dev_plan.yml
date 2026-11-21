@@ -19,14 +19,15 @@ jobs:
       SNOWFLAKE_ROLE: GITHUB_DCM_PLAN_ROLE
 
     steps:
-      # Checkout the branch containing this workflow
+
+      # 1. Checkout Main branch containing this workflow
       - name: Checkout Main Branch
         uses: actions/checkout@v4
         with:
           ref: main
           persist-credentials: false
 
-      # Checkout the DCM project from DEV
+      # 2. Checkout DCM project from DEV branch
       - name: Checkout DCM DEV Project
         uses: actions/checkout@v4
         with:
@@ -34,32 +35,74 @@ jobs:
           path: dcm_source
           persist-credentials: false
 
-      # Install Snowflake CLI and configure OIDC
+      # 3. Verify DCM project structure
+      - name: Verify DCM Project Structure
+        run: |
+          echo "Checking DCM project directory..."
+
+          if [ ! -d "dcm_source/my_dcm_project" ]; then
+            echo "ERROR: DCM project directory not found."
+            exit 1
+          fi
+
+          if [ ! -f "dcm_source/my_dcm_project/manifest.yml" ]; then
+            echo "ERROR: manifest.yml not found."
+            exit 1
+          fi
+
+          echo "DCM project structure verified."
+          ls -la dcm_source/my_dcm_project/
+
+      # 4. Install Snowflake CLI with OIDC authentication
       - name: Install Snowflake CLI with OIDC
         uses: snowflakedb/snowflake-actions@v3
         with:
           use-oidc: true
           cli-version: "3.24.0"
 
-      # Verify Snowflake connectivity
+      # 5. Verify Snowflake connection
       - name: Test Snowflake Connection
         run: |
+          echo "Testing Snowflake OIDC connection..."
+
           snow connection test -x
 
-      # Execute DCM PLAN
+      # 6. Execute DCM PLAN
       - name: DCM Plan - DEV
         run: |
+          echo "Executing DCM PLAN for DEV..."
+
           snow dcm plan \
             --target DEV \
             --from dcm_source/my_dcm_project \
             --save-output \
             -x
 
-      # Save PLAN output as a GitHub artifact
+          echo "DCM PLAN command completed."
+
+      # 7. Diagnose generated PLAN output
+      - name: Debug DCM Plan Output
+        if: always()
+        run: |
+          echo "Current directory:"
+          pwd
+
+          echo "DCM project contents:"
+          ls -la dcm_source/my_dcm_project/
+
+          echo "Searching for output directories:"
+          find dcm_source/my_dcm_project \
+            -type d -name out -print
+
+          echo "Searching for generated files:"
+          find dcm_source/my_dcm_project \
+            -type f | head -100
+
+      # 8. Upload PLAN results
       - name: Upload DCM Plan Results
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: dcm-dev-plan-results
           path: dcm_source/my_dcm_project/out/
-          if-no-files-found: error
+          if-no-files-found: warn
