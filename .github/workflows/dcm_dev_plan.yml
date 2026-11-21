@@ -44,10 +44,9 @@ jobs:
           PROJECT_DIR="dcm_source/my_dcm_project"
 
           echo "Checking DCM project directory..."
-          echo "Current directory: $(pwd)"
 
           if [ ! -d "$PROJECT_DIR" ]; then
-            echo "ERROR: DCM project directory not found: $PROJECT_DIR"
+            echo "ERROR: DCM project directory not found."
             exit 1
           fi
 
@@ -57,8 +56,9 @@ jobs:
           fi
 
           echo "DCM project structure verified."
+
           echo "Project directory contents:"
-          ls -la "$PROJECT_DIR"
+          find "$PROJECT_DIR" -maxdepth 5 -print
 
       # 4. Install Snowflake CLI with OIDC authentication
       - name: Install Snowflake CLI with OIDC
@@ -74,6 +74,7 @@ jobs:
           set -euo pipefail
 
           echo "Testing Snowflake OIDC connection..."
+
           snow connection test -x
 
           echo "Snowflake connection successful."
@@ -87,7 +88,7 @@ jobs:
           PROJECT_DIR="dcm_source/my_dcm_project"
 
           echo "Executing DCM PLAN for DEV..."
-          echo "DCM project: $PROJECT_DIR"
+          echo "Project directory: $PROJECT_DIR"
           echo "Target: DEV"
 
           snow dcm plan \
@@ -96,10 +97,55 @@ jobs:
             --save-output \
             -x
 
-          echo "DCM PLAN command completed successfully."
+          echo "DCM PLAN command completed."
 
-      # 7. Verify and copy DCM PLAN output
+      # 7. Diagnose DCM PLAN output
+      - name: Diagnose DCM PLAN Output
+        if: always()
+        shell: bash
+        run: |
+          PROJECT_DIR="dcm_source/my_dcm_project"
+
+          echo "======================================"
+          echo "DCM PROJECT DIRECTORY STRUCTURE"
+          echo "======================================"
+
+          if [ -d "$PROJECT_DIR" ]; then
+            find "$PROJECT_DIR" -maxdepth 8 -print
+          else
+            echo "DCM project directory not found."
+          fi
+
+          echo ""
+          echo "======================================"
+          echo "SEARCHING FOR PLAN OUTPUT FILES"
+          echo "======================================"
+
+          if [ -d "$PROJECT_DIR" ]; then
+            find "$PROJECT_DIR" -type f \
+              \( -iname "*.sql" \
+              -o -iname "*.json" \
+              -o -iname "*.yaml" \
+              -o -iname "*.yml" \
+              -o -iname "*.txt" \) \
+              -print
+          fi
+
+          echo ""
+          echo "======================================"
+          echo "CHECKING OUT DIRECTORY"
+          echo "======================================"
+
+          if [ -d "$PROJECT_DIR/out" ]; then
+            echo "OUT directory exists."
+            find "$PROJECT_DIR/out" -type f -print
+          else
+            echo "OUT directory does not exist."
+          fi
+
+      # 8. Prepare migrated directory
       - name: Prepare Migrated Directory
+        if: success()
         shell: bash
         run: |
           set -euo pipefail
@@ -108,47 +154,39 @@ jobs:
           SOURCE_DIR="$PROJECT_DIR/out"
           TARGET_DIR="$PROJECT_DIR/migrated"
 
-          echo "Checking DCM PLAN output..."
+          echo "Preparing migrated directory..."
 
-          # Verify that Snowflake generated the output directory
           if [ ! -d "$SOURCE_DIR" ]; then
             echo "ERROR: DCM PLAN output directory was not generated."
             echo "Expected location: $SOURCE_DIR"
-
-            echo "Project directory contents:"
-            find "$PROJECT_DIR" -maxdepth 3 -print
-
             exit 1
           fi
 
-          # Verify that output contains actual files
           FILE_COUNT=$(find "$SOURCE_DIR" -type f | wc -l)
 
           if [ "$FILE_COUNT" -eq 0 ]; then
             echo "ERROR: DCM PLAN output directory is empty."
-            echo "Expected output under: $SOURCE_DIR"
             exit 1
           fi
 
-          echo "Found $FILE_COUNT DCM PLAN output file(s)."
+          echo "Found $FILE_COUNT output files."
 
-          # Recreate migrated directory
           rm -rf "$TARGET_DIR"
           mkdir -p "$TARGET_DIR"
 
-          # Copy all output files and subdirectories
           cp -a "$SOURCE_DIR/." "$TARGET_DIR/"
 
-          echo "DCM PLAN output copied successfully."
+          echo "PLAN output copied successfully."
 
-          echo "Files in migrated directory:"
-          find "$TARGET_DIR" -type f -print
+          echo "Migrated directory contents:"
+          find "$TARGET_DIR" -maxdepth 8 -type f -print
 
           echo "Migrated directory size:"
           du -sh "$TARGET_DIR"
 
-      # 8. Upload migrated directory as GitHub artifact
+      # 9. Upload migrated directory as GitHub artifact
       - name: Upload DCM Plan Results
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: dcm-dev-plan-results
