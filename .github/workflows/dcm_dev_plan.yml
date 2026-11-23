@@ -85,7 +85,7 @@ jobs:
           SNOWFLAKE_TOKEN: ${{ steps.azure-token.outputs.token }}
         continue-on-error: true
         run: |
-          snow dcm plan --target ${{ inputs.sfEnvironment }} --from ./DCM_DEPLOY_POC_DB --save-output -x
+          snow dcm plan --target ${{ inputs.sfEnvironment }} --from ./my_dcm_project --save-output -x
 
       - name: 'Run DCM Create'
         id: dcm-create
@@ -96,7 +96,7 @@ jobs:
           SNOWFLAKE_TOKEN: ${{ steps.azure-token.outputs.token }}
         continue-on-error: true
         run: |
-          snow dcm create --target ${{ inputs.sfEnvironment }} --from ./DCM_DEPLOY_POC_DB --if-not-exists -x
+          snow dcm create --target ${{ inputs.sfEnvironment }} --from ./my_dcm_project --if-not-exists -x
 
       - name: 'Drop DCM'
         id: dcm-drop
@@ -107,7 +107,7 @@ jobs:
           SNOWFLAKE_TOKEN: ${{ steps.azure-token.outputs.token }}
         continue-on-error: true
         run: |
-          snow dcm drop --target ${{ inputs.sfEnvironment }} --from ./DCM_DEPLOY_POC_DB -x
+          snow dcm drop --target ${{ inputs.sfEnvironment }} --from ./my_dcm_project -x
 
       - name: 'Run DCM Deploy'
         id: dcm-deploy
@@ -118,7 +118,7 @@ jobs:
           SNOWFLAKE_TOKEN: ${{ steps.azure-token.outputs.token }}
         continue-on-error: true
         run: |
-          snow dcm deploy --target ${{ inputs.sfEnvironment }} --from ./DCM_DEPLOY_POC_DB -x
+          snow dcm deploy --target ${{ inputs.sfEnvironment }} --from ./my_dcm_project -x
 
       # ── Upload plan artifact ──────────────────────────────────
       - name: Upload plan output
