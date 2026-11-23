@@ -1,0 +1,39 @@
+manifest_version: 2
+type: DCM_PROJECT
+default_target: DEV
+
+targets:
+  DEV:
+    account_identifier: JLWGRJE-OR02911
+    project_name: DCM_ADMIN_DB.PROJECTS.DCM_SANDBOX_PROJECT
+    project_owner: ACCOUNTADMIN
+    templating_config: DEV
+
+  QA:
+    account_identifier: JLWGRJE-OR02911
+    project_name: DCM_ADMIN_DB.PROJECTS.DCM_QA_PROJECT
+    project_owner: ACCOUNTADMIN
+    templating_config: QA
+
+  PROD:
+    account_identifier: MYORG-MYACCOUNT
+    project_name: DCM_ADMIN_DB.PROJECTS.DCM_PROD_PROJECT
+    project_owner: ACCOUNTADMIN --DCM_PROD_DEPLOYER
+    templating_config: PROD
+
+templating:
+  configurations:
+    DEV:
+      env_prefix: "DEV_"
+      database_name: DEV_RAW_DB
+      schema_name: ALIP
+      wh_size: X-SMALL
+
+    QA:
+      env_prefix: "QA_"
+      database_name: QA_RAW_DB
+      schema_name: ALIP
+      wh_size: SMALL
+    PROD:
+      db_name: "PROD_RAW_DB"
+      schema_name: "ALIP"
