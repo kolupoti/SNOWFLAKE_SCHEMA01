@@ -1,3 +1,5 @@
+# Manually-triggered workflow to manage a Snowflake DCM (Database Change Management) project
+# Authenticates to Snowflake through Azure OIDC (no stored Snowflake passwords/keys)
 name: DCM Plan
 
 on:
@@ -19,8 +21,27 @@ on:
           - PLAN
           - DROP
           - DEPLOY
+      sourceDatabase:
+        type: string
+        description: Source database name (e.g. DEV_RAW_DB)
+        required: true
+        default: DEV_RAW_DB
+      sourceSchema:
+        type: string
+        description: Source schema name (e.g. ALIP)
+        required: true
+        default: ALIP
+      targetDatabase:
+        type: string
+        description: Target database name (e.g. QA_RAW_DB)
+        required: true
+      targetSchema:
+        type: string
+        description: Target schema name (e.g. ALIP)
+        required: true
+        default: ALIP
 
-permissions: 
+permissions:
   contents: read
   id-token: write
 
@@ -30,9 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       ENVIRONMENT_NAME: ${{ steps.set-environment.outputs.env_name }}
-
     steps:
-
     - name: 'Set Environment Name'
       id: set-environment
       run: |
@@ -40,11 +59,19 @@ jobs:
         if [[ "${{ github.ref_name }}" == "main" ]]; then
           echo "env_name=prd" >> "$GITHUB_OUTPUT"
         fi
-            
+
   dcm:
     runs-on: linux-self-hosted
     needs: [set-env]
     environment: ${{ needs.set-env.outputs.ENVIRONMENT_NAME }}
+
+    # Pass inputs via env vars (safer than inlining ${{ inputs.* }} in shell scripts)
+    env:
+      SF_ENV: ${{ inputs.sfEnvironment }}
+      SRC_DB: ${{ inputs.sourceDatabase }}
+      SRC_SCHEMA: ${{ inputs.sourceSchema }}
+      TGT_DB: ${{ inputs.targetDatabase }}
+      TGT_SCHEMA: ${{ inputs.targetSchema }}
 
     steps:
 
@@ -52,12 +79,29 @@ jobs:
         with:
           persist-credentials: false
 
+      # Free-text inputs: allow only valid unquoted Snowflake identifiers
+      - name: Validate database and schema inputs
+        run: |
+          for v in SRC_DB SRC_SCHEMA TGT_DB TGT_SCHEMA; do
+            val="${!v}"
+            if [[ ! "$val" =~ ^[A-Za-z_][A-Za-z0-9_$]*$ ]]; then
+              echo "::error::Invalid value for $v: '$val'"
+              exit 1
+            fi
+          done
+          # Uppercase for consistency with Snowflake's unquoted identifier behavior
+          echo "SRC_DB=${SRC_DB^^}"         >> "$GITHUB_ENV"
+          echo "SRC_SCHEMA=${SRC_SCHEMA^^}" >> "$GITHUB_ENV"
+          echo "TGT_DB=${TGT_DB^^}"         >> "$GITHUB_ENV"
+          echo "TGT_SCHEMA=${TGT_SCHEMA^^}" >> "$GITHUB_ENV"
+
       - name: Install Snow CLI
         run: |
           python3 -m venv .venv
           source .venv/bin/activate
           pip install snowflake-cli
           echo "$PWD/.venv/bin" >> $GITHUB_PATH
+
       - name: 'Azure Login via OIDC'
         uses: azure/login@v2
         with:
@@ -65,17 +109,20 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUB_ID }}
 
-      
       - name: 'Get Azure OIDC Token'
         id: azure-token
         run: |
           TOKEN=$(az account get-access-token --scope "api://966f935f-5447-4821-a6df-50a85a0c4c60/.default" --query accessToken -o tsv)
           echo "::add-mask::$TOKEN"
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      # Debug only: prints claims, not the token. Remove once stable.
       - name: Inspect OIDC Token
+        env:
+          TOKEN: ${{ steps.azure-token.outputs.token }}
         run: |
-          echo "${{ steps.azure-token.outputs.token }}" | cut -d'.' -f2 | base64 -d 2>/dev/null | jq .
-          
+          echo "$TOKEN" | cut -d'.' -f2 | base64 -d 2>/dev/null | jq .
+
       - name: 'Run DCM Plan'
         id: dcm-plan
         if: ${{ inputs.sfAction == 'PLAN' }}
@@ -85,7 +132,12 @@ jobs:
           SNOWFLAKE_TOKEN: ${{ steps.azure-token.outputs.token }}
         continue-on-error: true
         run: |
-          snow dcm plan --target ${{ inputs.sfEnvironment }} --from ./my_dcm_project --save-output -x
+          snow dcm plan --target "$SF_ENV" --from ./DCM_DEPLOY_POC_DB \
+            --variable "source_db=$SRC_DB" \
+            --variable "source_schema=$SRC_SCHEMA" \
+            --variable "target_db=$TGT_DB" \
+            --variable "target_schema=$TGT_SCHEMA" \
+            --save-output -x
 
       - name: 'Run DCM Create'
         id: dcm-create
@@ -96,7 +148,7 @@ jobs:
           SNOWFLAKE_TOKEN: ${{ steps.azure-token.outputs.token }}
         continue-on-error: true
         run: |
-          snow dcm create --target ${{ inputs.sfEnvironment }} --from ./my_dcm_project --if-not-exists -x
+          snow dcm create --target "$SF_ENV" --from ./DCM_DEPLOY_POC_DB --if-not-exists -x
 
       - name: 'Drop DCM'
         id: dcm-drop
@@ -107,7 +159,7 @@ jobs:
           SNOWFLAKE_TOKEN: ${{ steps.azure-token.outputs.token }}
         continue-on-error: true
         run: |
-          snow dcm drop --target ${{ inputs.sfEnvironment }} --from ./my_dcm_project -x
+          snow dcm drop --target "$SF_ENV" --from ./DCM_DEPLOY_POC_DB -x
 
       - name: 'Run DCM Deploy'
         id: dcm-deploy
@@ -116,15 +168,19 @@ jobs:
           SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT_NAME }}
           SNOWFLAKE_AUTHENTICATOR: oauth
           SNOWFLAKE_TOKEN: ${{ steps.azure-token.outputs.token }}
-        continue-on-error: true
         run: |
-          snow dcm deploy --target ${{ inputs.sfEnvironment }} --from ./my_dcm_project -x
+          snow dcm deploy --target "$SF_ENV" --from ./DCM_DEPLOY_POC_DB \
+            --variable "source_db=$SRC_DB" \
+            --variable "source_schema=$SRC_SCHEMA" \
+            --variable "target_db=$TGT_DB" \
+            --variable "target_schema=$TGT_SCHEMA" \
+            -x
 
-      # ── Upload plan artifact ──────────────────────────────────
+      # Upload plan output so it can be reviewed
       - name: Upload plan output
         if: ${{ inputs.sfAction == 'PLAN' }}
         uses: actions/upload-artifact@v4
         with:
-          name: dcm-plan-artifact
-          path: ./out/
-          retention-days: 30
+          name: dcm-plan-${{ inputs.sfEnvironment }}
+          path: out/
+          if-no-files-found: warn
