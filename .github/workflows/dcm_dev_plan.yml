@@ -1,195 +1,60 @@
+# WORKFLOW: DCM Plan
+# Purpose: on every pull request, run a Snowflake DCM PLAN (dry run) so
+#          reviewers see what would change before anything is deployed.
+name: DCM Plan
 
-name: DCM DEV Plan
-
+# TRIGGER: PRs into dev or main that change files in my_dcm_project/
 on:
-  workflow_dispatch:
+  pull_request:
+    branches: [dev, main]
+    paths: ["my_dcm_project/**"]
 
+# PERMISSIONS for the temporary GitHub token
+#   contents: read       -> check out the repo
+#   id-token: write      -> issue an OIDC token to log in to Snowflake
+#   pull-requests: write -> post the plan summary on the PR
 permissions:
   contents: read
   id-token: write
+  pull-requests: write
 
 jobs:
-  plan:
-    name: Execute DCM PLAN - DEV
+  # JOB 1: decide the environment from the branch the PR targets
+  setup:
     runs-on: ubuntu-latest
-
-    env:
-      SNOWFLAKE_ACCOUNT: ${{ vars.SNOWFLAKE_ACCOUNT }}
-      SNOWFLAKE_USER: GITHUB_DCM_PLAN_USER
-      SNOWFLAKE_ROLE: GITHUB_DCM_PLAN_ROLE
-
+    outputs:
+      target: ${{ steps.map.outputs.target }}      # DEV or QA (manifest target)
+      env_name: ${{ steps.map.outputs.env_name }}  # dev or qa (GitHub Environment)
     steps:
+      # PR into main -> QA / qa ; PR into dev -> DEV / dev
+      - id: map
+        run: |
+          if [ "${{ github.base_ref }}" = "main" ]; then
+            echo "target=QA"  >> "$GITHUB_OUTPUT"
+            echo "env_name=qa" >> "$GITHUB_OUTPUT"
+          else
+            echo "target=DEV" >> "$GITHUB_OUTPUT"
+            echo "env_name=dev" >> "$GITHUB_OUTPUT"
+          fi
 
-      # 1. Checkout Main branch containing the workflow
-      - name: Checkout Main Branch
-        uses: actions/checkout@v4
+  # JOB 2: run the plan against the chosen target
+  plan:
+    needs: setup
+    runs-on: ubuntu-latest
+    # The GitHub Environment supplies the SNOWFLAKE_USER variable and the
+    # identity (subject) in the OIDC token that Snowflake checks.
+    environment: ${{ needs.setup.outputs.env_name }}
+    steps:
+      # STEP 1: download the PR code (manifest.yml and definitions)
+      - uses: actions/checkout@v4
         with:
-          ref: main
           persist-credentials: false
 
-      # 2. Checkout DCM project from DEV branch
-      - name: Checkout DCM DEV Project
-        uses: actions/checkout@v4
+      # STEP 2: install the Snowflake CLI, log in with OIDC, run the plan.
+      # Account, project object, owner role and templating config all come
+      # from the matching target in manifest.yml.
+      - uses: snowflakedb/snowflake-actions/dcm/plan@v3
         with:
-          ref: dev
-          path: dcm_source
-          persist-credentials: false
-
-      # 3. Verify DCM project structure
-      - name: Verify DCM Project Structure
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          PROJECT_DIR="dcm_source/my_dcm_project"
-
-          echo "Checking DCM project directory..."
-
-          if [ ! -d "$PROJECT_DIR" ]; then
-            echo "ERROR: DCM project directory not found."
-            exit 1
-          fi
-
-          if [ ! -f "$PROJECT_DIR/manifest.yml" ]; then
-            echo "ERROR: manifest.yml not found."
-            exit 1
-          fi
-
-          echo "DCM project structure verified."
-
-          echo "Project directory contents:"
-          find "$PROJECT_DIR" -maxdepth 5 -print
-
-      # 4. Install Snowflake CLI with OIDC authentication
-      - name: Install Snowflake CLI with OIDC
-        uses: snowflakedb/snowflake-actions@v3
-        with:
-          use-oidc: true
-          cli-version: "3.24.0"
-
-      # 5. Test Snowflake connection
-      - name: Test Snowflake Connection
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "Testing Snowflake OIDC connection..."
-
-          snow connection test -x
-
-          echo "Snowflake connection successful."
-
-      # 6. Execute DCM PLAN for DEV
-      - name: DCM Plan - DEV
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          PROJECT_DIR="dcm_source/my_dcm_project"
-
-          echo "Executing DCM PLAN for DEV..."
-          echo "Project directory: $PROJECT_DIR"
-          echo "Target: DEV"
-
-          snow dcm plan \
-            --target DEV \
-            --from "$PROJECT_DIR" \
-            --save-output \
-            -x
-
-          echo "DCM PLAN command completed."
-
-      # 7. Diagnose DCM PLAN output
-      - name: Diagnose DCM PLAN Output
-        if: always()
-        shell: bash
-        run: |
-          PROJECT_DIR="dcm_source/my_dcm_project"
-
-          echo "======================================"
-          echo "DCM PROJECT DIRECTORY STRUCTURE"
-          echo "======================================"
-
-          if [ -d "$PROJECT_DIR" ]; then
-            find "$PROJECT_DIR" -maxdepth 8 -print
-          else
-            echo "DCM project directory not found."
-          fi
-
-          echo ""
-          echo "======================================"
-          echo "SEARCHING FOR PLAN OUTPUT FILES"
-          echo "======================================"
-
-          if [ -d "$PROJECT_DIR" ]; then
-            find "$PROJECT_DIR" -type f \
-              \( -iname "*.sql" \
-              -o -iname "*.json" \
-              -o -iname "*.yaml" \
-              -o -iname "*.yml" \
-              -o -iname "*.txt" \) \
-              -print
-          fi
-
-          echo ""
-          echo "======================================"
-          echo "CHECKING OUT DIRECTORY"
-          echo "======================================"
-
-          if [ -d "$PROJECT_DIR/out" ]; then
-            echo "OUT directory exists."
-            find "$PROJECT_DIR/out" -type f -print
-          else
-            echo "OUT directory does not exist."
-          fi
-
-      # 8. Prepare migrated directory
-      - name: Prepare Migrated Directory
-        if: success()
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          PROJECT_DIR="dcm_source/my_dcm_project"
-          SOURCE_DIR="$PROJECT_DIR/out"
-          TARGET_DIR="$PROJECT_DIR/migrated"
-
-          echo "Preparing migrated directory..."
-
-          if [ ! -d "$SOURCE_DIR" ]; then
-            echo "ERROR: DCM PLAN output directory was not generated."
-            echo "Expected location: $SOURCE_DIR"
-            exit 1
-          fi
-
-          FILE_COUNT=$(find "$SOURCE_DIR" -type f | wc -l)
-
-          if [ "$FILE_COUNT" -eq 0 ]; then
-            echo "ERROR: DCM PLAN output directory is empty."
-            exit 1
-          fi
-
-          echo "Found $FILE_COUNT output files."
-
-          rm -rf "$TARGET_DIR"
-          mkdir -p "$TARGET_DIR"
-
-          cp -a "$SOURCE_DIR/." "$TARGET_DIR/"
-
-          echo "PLAN output copied successfully."
-
-          echo "Migrated directory contents:"
-          find "$TARGET_DIR" -maxdepth 8 -type f -print
-
-          echo "Migrated directory size:"
-          du -sh "$TARGET_DIR"
-
-      # 9. Upload migrated directory as GitHub artifact
-      - name: Upload DCM Plan Results
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: dcm-dev-plan-results
-          path: dcm_source/my_dcm_project/migrated/
-          if-no-files-found: error
-          retention-days: 30
+          target: ${{ needs.setup.outputs.target }}
+          project-path: my_dcm_project/
+          snowflake-user: ${{ vars.SNOWFLAKE_USER }}
