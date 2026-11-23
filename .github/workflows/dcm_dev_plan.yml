@@ -1,16 +1,26 @@
+# ===============================================================
 # WORKFLOW: DCM Plan
-# Purpose: run a Snowflake DCM PLAN (dry run). Runs automatically on pull
-#          requests, and can also be started manually from the Actions tab.
+# Purpose : Run a Snowflake DCM PLAN (a dry run that shows what WOULD
+#           change; nothing is deployed). Runs automatically on pull
+#           requests and can also be started manually from the
+#           Actions tab.
+# Location: .github/workflows/dcm_plan.yml (repo root)
+# ===============================================================
 name: DCM Plan
 
+# ---------------------------------------------------------------
+# TRIGGERS: when this workflow starts
+# ---------------------------------------------------------------
 on:
-  # Automatic: PRs into dev or main that change files in my_dcm_project/
+  # Automatic: a pull request into dev or main that changes any file
+  # inside my_dcm_project/
   pull_request:
     branches: [dev, main]
     paths: ["my_dcm_project/**"]
 
   # Manual: adds the "Run workflow" button in the Actions tab.
-  # The person starting it picks the branch and the target.
+  # The person starting it picks the branch ("Use workflow from")
+  # and the target environment from the dropdown below.
   workflow_dispatch:
     inputs:
       target:
@@ -18,51 +28,21 @@ on:
         required: true
         default: DEV
         type: choice
-        options:
+        options:          # must match target names in manifest.yml
           - DEV
           - QA
 
+# ---------------------------------------------------------------
+# PERMISSIONS for the temporary GitHub token used by this run
+#   contents: read       -> allows checking out the repo files
+#   id-token: write      -> allows OIDC login to Snowflake
+#                           (no password or key stored in GitHub)
+#   pull-requests: write -> allows posting the plan summary on a PR
+# ---------------------------------------------------------------
 permissions:
   contents: read
-  id-token: write        # OIDC login to Snowflake
-  pull-requests: write   # post the plan summary on PRs
+  id-token: write
+  pull-requests: write
 
 jobs:
-  # JOB 1: decide the environment
-  setup:
-    runs-on: ubuntu-latest
-    outputs:
-      target: ${{ steps.map.outputs.target }}      # DEV or QA
-      env_name: ${{ steps.map.outputs.env_name }}  # dev or qa
-    steps:
-      # Manual run  -> use the target chosen in the dropdown
-      # PR into main -> QA ; PR into dev -> DEV
-      - id: map
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TARGET="${{ inputs.target }}"
-          elif [ "${{ github.base_ref }}" = "main" ]; then
-            TARGET="QA"
-          else
-            TARGET="DEV"
-          fi
-          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
-          echo "env_name=$(echo "$TARGET" | tr 'A-Z' 'a-z')" >> "$GITHUB_OUTPUT"
-
-  # JOB 2: run the plan against that target
-  plan:
-    needs: setup
-    runs-on: ubuntu-latest
-    environment: ${{ needs.setup.outputs.env_name }}   # dev or qa
-    steps:
-      # STEP 1: download the code from the selected branch
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      # STEP 2: install Snowflake CLI, log in via OIDC, run the plan
-      - uses: snowflakedb/snowflake-actions/dcm/plan@v3
-        with:
-          target: ${{ needs.setup.outputs.target }}
-          project-path: my_dcm_project/
-          snowflake-user: ${{ vars.SNOWFLAKE_USER }}
+  #
