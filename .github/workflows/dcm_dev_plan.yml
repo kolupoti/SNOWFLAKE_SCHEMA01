@@ -1,68 +1,130 @@
-# WORKFLOW: DCM Plan
-# Purpose: run a Snowflake DCM PLAN (dry run). Runs automatically on pull
-#          requests, and can also be started manually from the Actions tab.
 name: DCM Plan
 
 on:
-  # Automatic: PRs into dev or main that change files in my_dcm_project/
-  pull_request:
-    branches: [dev, main]
-    paths: ["my_dcm_project/**"]
-
-  # Manual: adds the "Run workflow" button in the Actions tab.
-  # The person starting it picks the branch and the target.
   workflow_dispatch:
     inputs:
-      target:
-        description: "Which environment to plan against"
-        required: true
-        default: DEV
+      sfEnvironment:
         type: choice
+        description: Which level to deploy to
         options:
           - DEV
           - QA
+          - UAT
+          - PROD
+      sfAction:
+        type: choice
+        description: Action on the DCM project
+        options:
+          - CREATE
+          - PLAN
+          - DROP
+          - DEPLOY
 
-permissions:
+permissions: 
   contents: read
-  id-token: write        # OIDC login to Snowflake
-  pull-requests: write   # post the plan summary on PRs
+  id-token: write
 
 jobs:
-  # JOB 1: decide the environment
-  setup:
+
+  set-env:
     runs-on: ubuntu-latest
     outputs:
-      target: ${{ steps.map.outputs.target }}      # DEV or QA
-      env_name: ${{ steps.map.outputs.env_name }}  # dev or qa
-    steps:
-      # Manual run  -> use the target chosen in the dropdown
-      # PR into main -> QA ; PR into dev -> DEV
-      - id: map
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TARGET="${{ inputs.target }}"
-          elif [ "${{ github.base_ref }}" = "main" ]; then
-            TARGET="QA"
-          else
-            TARGET="DEV"
-          fi
-          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
-          echo "env_name=$(echo "$TARGET" | tr 'A-Z' 'a-z')" >> "$GITHUB_OUTPUT"
+      ENVIRONMENT_NAME: ${{ steps.set-environment.outputs.env_name }}
 
-  # JOB 2: run the plan against that target
-  plan:
-    needs: setup
-    runs-on: ubuntu-latest
-    environment: ${{ needs.setup.outputs.env_name }}   # dev or qa
     steps:
-      # STEP 1: download the code from the selected branch
-      - uses: actions/checkout@v4
+
+    - name: 'Set Environment Name'
+      id: set-environment
+      run: |
+        echo "env_name=nonprod" >> "$GITHUB_OUTPUT"
+        if [[ "${{ github.ref_name }}" == "main" ]]; then
+          echo "env_name=prd" >> "$GITHUB_OUTPUT"
+        fi
+            
+  dcm:
+    runs-on: linux-self-hosted
+    needs: [set-env]
+    environment: ${{ needs.set-env.outputs.ENVIRONMENT_NAME }}
+
+    steps:
+
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
 
-      # STEP 2: install Snowflake CLI, log in via OIDC, run the plan
-      - uses: snowflakedb/snowflake-actions/dcm/plan@v3
+      - name: Install Snow CLI
+        run: |
+          python3 -m venv .venv
+          source .venv/bin/activate
+          pip install snowflake-cli
+          echo "$PWD/.venv/bin" >> $GITHUB_PATH
+      - name: 'Azure Login via OIDC'
+        uses: azure/login@v2
         with:
-          target: ${{ needs.setup.outputs.target }}
-          project-path: my_dcm_project/
-          snowflake-user: ${{ vars.SNOWFLAKE_USER }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUB_ID }}
+
+      
+      - name: 'Get Azure OIDC Token'
+        id: azure-token
+        run: |
+          TOKEN=$(az account get-access-token --scope "api://966f935f-5447-4821-a6df-50a85a0c4c60/.default" --query accessToken -o tsv)
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+      - name: Inspect OIDC Token
+        run: |
+          echo "${{ steps.azure-token.outputs.token }}" | cut -d'.' -f2 | base64 -d 2>/dev/null | jq .
+          
+      - name: 'Run DCM Plan'
+        id: dcm-plan
+        if: ${{ inputs.sfAction == 'PLAN' }}
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT_NAME }}
+          SNOWFLAKE_AUTHENTICATOR: oauth
+          SNOWFLAKE_TOKEN: ${{ steps.azure-token.outputs.token }}
+        continue-on-error: true
+        run: |
+          snow dcm plan --target ${{ inputs.sfEnvironment }} --from ./DCM_DEPLOY_POC_DB --save-output -x
+
+      - name: 'Run DCM Create'
+        id: dcm-create
+        if: ${{ inputs.sfAction == 'CREATE' }}
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT_NAME }}
+          SNOWFLAKE_AUTHENTICATOR: oauth
+          SNOWFLAKE_TOKEN: ${{ steps.azure-token.outputs.token }}
+        continue-on-error: true
+        run: |
+          snow dcm create --target ${{ inputs.sfEnvironment }} --from ./DCM_DEPLOY_POC_DB --if-not-exists -x
+
+      - name: 'Drop DCM'
+        id: dcm-drop
+        if: ${{ inputs.sfAction == 'DROP' }}
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT_NAME }}
+          SNOWFLAKE_AUTHENTICATOR: oauth
+          SNOWFLAKE_TOKEN: ${{ steps.azure-token.outputs.token }}
+        continue-on-error: true
+        run: |
+          snow dcm drop --target ${{ inputs.sfEnvironment }} --from ./DCM_DEPLOY_POC_DB -x
+
+      - name: 'Run DCM Deploy'
+        id: dcm-deploy
+        if: ${{ inputs.sfAction == 'DEPLOY' }}
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT_NAME }}
+          SNOWFLAKE_AUTHENTICATOR: oauth
+          SNOWFLAKE_TOKEN: ${{ steps.azure-token.outputs.token }}
+        continue-on-error: true
+        run: |
+          snow dcm deploy --target ${{ inputs.sfEnvironment }} --from ./DCM_DEPLOY_POC_DB -x
+
+      # ── Upload plan artifact ──────────────────────────────────
+      - name: Upload plan output
+        if: ${{ inputs.sfAction == 'PLAN' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: dcm-plan-artifact
+          path: ./out/
+          retention-days: 30
